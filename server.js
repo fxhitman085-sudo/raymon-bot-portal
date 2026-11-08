@@ -5,6 +5,7 @@ const {randomBytes,scrypt,timingSafeEqual}=require('node:crypto');
 const {promisify}=require('node:util');
 const {isIP}=require('node:net');
 const {Store,PortalError,OWNER_EMAIL}=require('./store');
+const {startWorker}=require('./worker');
 const derive=promisify(scrypt);
 const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
@@ -183,7 +184,26 @@ if(require.main===module){
   const store=new Store(path.join(dir,'portal.sqlite'),Date.now,Math.max(1,Math.min(30,Number(process.env.MAX_BOTS)||8)));
   const server=createServer({store,origin:process.env.PUBLIC_ORIGIN||'http://localhost:3000',
     ownerSignupToken:process.env.OWNER_SIGNUP_TOKEN,workerToken:process.env.WORKER_TOKEN,railwayProxy:!!process.env.RAILWAY_SERVICE_ID});
-  server.listen(port,'::',()=>console.log('Raymon portal listening on port '+port));
-  process.once('SIGTERM',()=>server.close(()=>store.db.close()));
+  const runWorker=process.env.PORTAL_RUN_WORKER==='1'||
+    (!!process.env.RAILWAY_SERVICE_ID&&process.env.PORTAL_RUN_WORKER!=='0');
+  let stopWorker,closing=false;
+  server.listen(port,'::',()=>{
+    const actualPort=server.address().port;
+    console.log('Raymon portal listening on port '+actualPort);
+    if(runWorker)stopWorker=startWorker({
+      root:path.resolve(process.env.WORKER_DATA_DIR||path.join(dir,'worker')),
+      url:'http://127.0.0.1:'+actualPort,token:process.env.WORKER_TOKEN
+    });
+  });
+  async function stop(){
+    if(closing)return;
+    closing=true;
+    const serverClosed=new Promise(resolve=>server.close(resolve));
+    await stopWorker?.();
+    await serverClosed;
+    store.db.close();
+  }
+  process.once('SIGTERM',()=>void stop());
+  process.once('SIGINT',()=>void stop());
 }
 module.exports={createServer};
