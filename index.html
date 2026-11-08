@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c1010">
+  <meta name="description" content="Link WhatsApp to RAYMON BOT and manage your bot, pairing and coins in one dashboard.">
+  <title>RAYMON BOT — WhatsApp Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="top"><div class="shell nav">
+    <a class="brand" href="/" aria-label="RAYMON BOT home"><span class="mark" aria-hidden="true">R</span><span>RAYMON<span class="brand-bot"> BOT</span></span></a>
+    <span class="nav-note"><span class="dot"></span> WHATSAPP BOT PORTAL</span>
+    <button id="sign-out" class="button subtle" type="button" hidden>Sign out</button>
+  </div></header>
+  <main class="shell">
+    <p id="notice" class="notice" role="status" hidden></p>
+    <section id="landing" class="landing">
+      <div class="hero">
+        <p class="eyebrow"><span class="dot"></span> THE WHATSAPP BOT DASHBOARD</p>
+        <h1>Your WhatsApp.<br><em>Your bot.</em></h1>
+        <p class="intro">Link your number, start RAYMON BOT and manage your time from one private dashboard.</p>
+        <a id="sign-in" class="button primary" href="/auth/google">Continue with Google <span aria-hidden="true">↗</span></a>
+        <p class="small first">Your first 24 hours are covered by 10 free coins.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-head"><span class="dot"></span><span>HOW IT WORKS</span></div>
+        <div class="step"><span>01</span><div><strong>Sign in</strong><p>Create your dashboard with your Google account.</p></div></div>
+        <div class="step"><span>02</span><div><strong>Link WhatsApp</strong><p>Enter your number and use the code in Linked devices.</p></div></div>
+        <div class="step"><span>03</span><div><strong>Go online</strong><p>10 coins cover 24 hours. See your balance and renewal any time.</p></div></div>
+      </div>
+    </section>
+    <section id="dashboard" hidden>
+      <div class="desk-head">
+        <div><p class="eyebrow">YOUR CONTROL CENTER</p><h1 id="greeting" class="dash-title">Dashboard</h1><p class="muted" id="account-email"></p></div>
+        <div class="tabs" aria-label="Dashboard views"><button id="view-bot" class="button subtle selected" type="button">My bot</button><button id="view-owner" class="button subtle" type="button" hidden>Owner dashboard</button></div>
+      </div>
+      <div id="bot-view">
+        <div class="metrics">
+          <article class="metric"><p>COIN BALANCE</p><strong id="balance">0</strong><span>coins available</span></article>
+          <article class="metric"><p>BOT STATUS</p><strong id="bot-state" class="medium">Not linked</strong><span id="bot-phone">No WhatsApp number</span></article>
+          <article class="metric"><p>PAID THROUGH</p><strong id="paid-until" class="medium">—</strong><span>10 coins per 24 hours</span></article>
+        </div>
+        <div class="panels">
+          <article class="panel">
+            <p class="eyebrow">CONNECTION</p><h2 id="connection-title">Link WhatsApp</h2>
+            <p id="connection-info" class="muted">Use a WhatsApp account you control.</p>
+            <form id="pair-form">
+              <label for="phone">WhatsApp number</label>
+              <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="24" placeholder="+234 800 000 0000" required>
+              <button class="button primary" type="submit">Get pairing code <span aria-hidden="true">↗</span></button>
+            </form>
+            <div id="pair-code-area" class="pair-code" hidden>
+              <p class="eyebrow">YOUR PRIVATE PAIRING CODE</p>
+              <div class="code-row"><strong id="pair-code"></strong><button class="button subtle" id="copy-code" type="button">Copy code</button></div>
+              <p class="muted">In WhatsApp, open <b>Linked devices → Link a device → Link with phone number instead</b>. Enter the code there. Keep it private.</p>
+              <p id="expires" class="small"></p>
+            </div>
+            <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
+          </article>
+          <article class="panel"><p class="eyebrow">WALLET</p><h2>Coin activity</h2><p class="muted">Starter coins, uptime charges and owner adjustments.</p><ul id="history" class="history"></ul></article>
+        </div>
+      </div>
+      <section id="owner-view" class="panel" hidden>
+        <div class="owner-head"><div><p class="eyebrow">OWNER ACCESS</p><h2>Manage accounts</h2><p class="muted">Adjust balances, review activity and manage access.</p></div>
+        <form id="search-form"><label for="search">Search users</label><div class="actions"><input id="search" placeholder="Name, email or number" maxlength="100"><button class="button subtle">Search</button></div></form></div>
+        <div class="table-scroll"><table><thead><tr><th>User</th><th>WhatsApp</th><th>Coins</th><th>Bot status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
+        <div id="admin-detail" class="admin-detail" hidden>
+          <h3 id="selected-user"></h3>
+          <form id="owner-action" class="owner-form">
+            <div><label for="action">Action</label><select id="action"><option value="grant">Add coins</option><option value="remove">Remove coins</option><option value="pause">Pause bot</option><option value="ban">Ban user</option><option value="unban">Unban user</option></select></div>
+            <div id="amount-field"><label for="amount">Coins</label><input id="amount" type="number" min="1" max="100000" value="10" inputmode="numeric"></div>
+            <div><label for="reason">Reason</label><input id="reason" maxlength="180" required placeholder="Reason for this action"></div>
+            <button class="button primary">Apply action</button>
+          </form>
+          <div class="panels audit"><div><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div><h3>Owner actions</h3><ul class="history" id="selected-audit"></ul></div></div>
+        </div>
+      </section>
+    </section>
+    <footer><span><b>RAYMON BOT</b> / WhatsApp dashboard</span><span>Independent deployment portal</span></footer>
+  </main>
+</body>
+</html>
