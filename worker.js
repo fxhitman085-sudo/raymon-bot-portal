@@ -125,16 +125,16 @@ async function createRuntimeBot({dir,authDir,phone,id}){
   return {bot,close:()=>db.close()};
 }
 
-if(require.main===module){
-  process.umask(0o077);
-  const token=process.env.WORKER_TOKEN;
-  if(!token||token.length<32||!process.env.PORTAL_INTERNAL_URL)throw new Error('Set WORKER_TOKEN and PORTAL_INTERNAL_URL.');
-  const worker=new Worker({root:path.resolve(process.env.WORKER_DATA_DIR||'./data/worker'),
-    url:process.env.PORTAL_INTERNAL_URL,token,createBot:createRuntimeBot});
-  let timer,running,stopping=false,lastWarning=0;
+function startWorker({root,url,token}){
+  if(!token||token.length<32||!url)throw new Error('Set WORKER_TOKEN and PORTAL_INTERNAL_URL.');
+  const worker=new Worker({root,url,token,createBot:createRuntimeBot});
+  let timer,running,stopping=false,lastWarning=0,ready=false;
   function schedule(){
     if(stopping)return;
-    running=worker.tick().catch(()=>{
+    running=worker.tick().then(()=>{
+      if(!ready){ready=true;console.log('Portal pairing worker connected to the portal.');}
+    }).catch(()=>{
+      ready=false;
       if(Date.now()-lastWarning>30_000){lastWarning=Date.now();console.warn('Portal worker is retrying the control connection.');}
     }).finally(()=>{if(!stopping)timer=setTimeout(schedule,2000);});
   }
@@ -146,8 +146,15 @@ if(require.main===module){
     await running;
     await worker.stop();
   }
+  schedule();
+  return stop;
+}
+
+if(require.main===module){
+  process.umask(0o077);
+  const stop=startWorker({root:path.resolve(process.env.WORKER_DATA_DIR||'./data/worker'),
+    url:process.env.PORTAL_INTERNAL_URL,token:process.env.WORKER_TOKEN});
   process.once('SIGTERM',()=>void stop());
   process.once('SIGINT',()=>void stop());
-  schedule();
 }
-module.exports={Worker,samePhone};
+module.exports={Worker,samePhone,startWorker};

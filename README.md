@@ -4,7 +4,13 @@ A separate website and WhatsApp worker. Email and password sign-in, private What
 
 ## Railway deployment
 
-Create a **new** Railway project and two services from this repository. Use one replica per service. Both services use the supplied Dockerfile.
+Deploy the portal from this repository using the supplied Dockerfile. On Railway, `npm start` or `node server.js` starts the website and its pairing worker together by default. Use one replica and the existing public domain and `WORKER_TOKEN`. Keep `PORTAL_DATA_DIR` pointed at its existing persistent volume so accounts and balances survive redeployments. By default, worker sessions are stored in the `worker` directory under `PORTAL_DATA_DIR`. If `WORKER_DATA_DIR` is set, point it at persistent storage too.
+
+Set the health check to `/health`. After deployment, check the logs for `Portal pairing worker connected to the portal.` and request a fresh pairing code from the dashboard. The combined service uses a loopback connection and determines its port automatically.
+
+### Optional separate worker service
+
+For an existing two-service deployment, set `PORTAL_RUN_WORKER=0` on the website to keep running the worker separately. Use one replica per service.
 
 | Setting | Portal (public) | Bot worker (private) |
 | --- | --- | --- |
@@ -26,7 +32,7 @@ Use a spare WhatsApp number that is absent from your existing Bot-Hosting.net de
 
 ## Billing behavior
 
-- A Google account receives the starter grant once. A verified WhatsApp number binds to one portal account. Pending attempts expire after three minutes.
+- A portal account receives the starter grant once. A verified WhatsApp number binds to one portal account. Pending attempts expire after three minutes.
 - The worker must verify that the connected WhatsApp identity matches the requested number. A successfully connected, eligible bot buys a 24-hour period for 10 coins. Pairing requests and failed links do not debit coins.
 - When paid time expires the worker renews only while connected and with enough coins. The same paid period cannot be charged twice. If the wallet cannot renew, the bot stops and saved credentials remain. Adding enough coins to an eligible low-balance bot lets it reconnect automatically.
 - Pausing manually or being banned stops the bot. The existing paid period continues to elapse. Unbanning restores dashboard actions; the user chooses Resume. If WhatsApp unlinks the session the portal offers a new code.
@@ -35,4 +41,4 @@ Use a spare WhatsApp number that is absent from your existing Bot-Hosting.net de
 
 ## Local checks
 
-Use Node 24. Run `npm ci --ignore-scripts`, `npm run build`, and `npm test`. For a local landing page, set a random `WORKER_TOKEN` and run `npm start`. To start the worker locally, also set `PORTAL_INTERNAL_URL=http://localhost:3000` and run `npm run worker`. The tests exercise password sign-in and mock WhatsApp; they do not link a real number.
+Use Node 24. Run `npm ci --ignore-scripts`, `npm run build`, and `npm test`. Set a random `WORKER_TOKEN` and run `npm start` for the website. Set `PORTAL_RUN_WORKER=1` to run both locally. To run the worker separately, set `PORTAL_INTERNAL_URL=http://localhost:3000` and run `npm run worker`. The tests exercise password sign-in and mock WhatsApp; they do not link a real number.
