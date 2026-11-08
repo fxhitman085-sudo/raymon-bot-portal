@@ -22,14 +22,25 @@
         <p class="eyebrow"><span class="dot"></span> THE WHATSAPP BOT DASHBOARD</p>
         <h1>Your WhatsApp.<br><em>Your bot.</em></h1>
         <p class="intro">Link your number, start RAYMON BOT and manage your time from one private dashboard.</p>
-        <a id="sign-in" class="button primary" href="/auth/google">Continue with Google <span aria-hidden="true">↗</span></a>
         <p class="small first">Your first 24 hours are covered by 10 free coins.</p>
       </div>
-      <div class="feature">
-        <div class="feature-head"><span class="dot"></span><span>HOW IT WORKS</span></div>
-        <div class="step"><span>01</span><div><strong>Sign in</strong><p>Create your dashboard with your Google account.</p></div></div>
-        <div class="step"><span>02</span><div><strong>Link WhatsApp</strong><p>Enter your number and use the code in Linked devices.</p></div></div>
-        <div class="step"><span>03</span><div><strong>Go online</strong><p>10 coins cover 24 hours. See your balance and renewal any time.</p></div></div>
+      <div class="feature auth-card">
+        <div class="feature-head"><span class="dot"></span><span>YOUR PORTAL ACCOUNT</span></div>
+        <div class="tabs auth-tabs" aria-label="Account options">
+          <button id="auth-login" class="button subtle selected" type="button" aria-pressed="true">Sign in</button>
+          <button id="auth-register" class="button subtle" type="button" aria-pressed="false">Create account</button>
+        </div>
+        <form id="auth-form" method="post" action="/api/auth/login">
+          <div id="auth-name-field" hidden><label for="auth-name">Name</label><input id="auth-name" autocomplete="name" maxlength="90" disabled></div>
+          <div><label for="auth-email">Email address</label><input id="auth-email" type="email" autocomplete="username" inputmode="email" maxlength="254" required placeholder="you@example.com"></div>
+          <div><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required></div>
+          <p id="auth-password-hint" class="small" hidden>Use at least 12 characters.</p>
+          <details id="auth-owner" hidden>
+            <summary>Setting up the owner account?</summary>
+            <label for="auth-owner-token">One-time owner setup token</label><input id="auth-owner-token" type="password" autocomplete="off" maxlength="256" disabled>
+          </details>
+          <button id="auth-submit" class="button primary" type="submit">Sign in</button>
+        </form>
       </div>
     </section>
     <section id="dashboard" hidden>
@@ -37,6 +48,15 @@
         <div><p class="eyebrow">YOUR CONTROL CENTER</p><h1 id="greeting" class="dash-title">Dashboard</h1><p class="muted" id="account-email"></p></div>
         <div class="tabs" aria-label="Dashboard views"><button id="view-bot" class="button subtle selected" type="button">My bot</button><button id="view-owner" class="button subtle" type="button" hidden>Owner dashboard</button></div>
       </div>
+      <article id="password-setup" class="panel password-setup" hidden>
+        <h2>Set a password for this account</h2>
+        <p class="muted">Use a new password of at least 12 characters to keep your existing account and coin balance.</p>
+        <form id="set-password-form" method="post" action="/api/auth/set-password">
+          <label for="new-password">New password</label>
+          <input id="new-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+          <button class="button primary" type="submit">Save password</button>
+        </form>
+      </article>
       <div id="bot-view">
         <div class="metrics">
           <article class="metric"><p>COIN BALANCE</p><strong id="balance">0</strong><span>coins available</span></article>

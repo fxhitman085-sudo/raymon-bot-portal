@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 const names={queued:'Requesting code',awaiting_code:'Awaiting link',connecting:'Connecting',online:'Online',paused:'Paused',
   low_balance:'Paused · Low balance',expired:'Code expired',needs_pairing:'Needs pairing',pair_failed:'Pairing failed',suspended:'Suspended'};
 const formatDate=value=>new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-let current,selectedUser,ownerOpen=false,refreshing=false;
+let current,selectedUser,ownerOpen=false,refreshing=false,registering=false;
 const note=(message,error=false)=>{
   $('notice').textContent=message;
   $('notice').classList.toggle('error',error);
@@ -41,6 +41,7 @@ function draw(data){
   $('greeting').textContent='Hi, '+user.name.split(' ')[0];
   $('account-email').textContent=user.email;
   $('view-owner').hidden=!user.isOwner;
+  $('password-setup').hidden=!user.needsPassword||user.banned;
   $('balance').textContent=user.coins;
   $('bot-state').textContent=user.banned?'Suspended':(names[d?.state]||'Not linked');
   $('bot-phone').textContent=d?.phone||'No WhatsApp number';
@@ -154,10 +155,47 @@ $('owner-action').addEventListener('submit',event=>{
     note('Owner action recorded.');
   });
 });
-const loginError=new URLSearchParams(location.search).get('error');
-if(loginError){
-  note(loginError==='setup'?'Google sign-in is awaiting deployment configuration.':'Google sign-in could not be completed. Please try again.',true);
-  history.replaceState({},'',location.pathname);
+function authMode(register){
+  registering=register;
+  $('auth-name-field').hidden=!register;
+  $('auth-name').required=register;
+  $('auth-name').disabled=!register;
+  $('auth-owner').hidden=!register;
+  $('auth-owner-token').disabled=!register;
+  $('auth-password-hint').hidden=!register;
+  $('auth-password').autocomplete=register?'new-password':'current-password';
+  $('auth-password').minLength=register?12:1;
+  $('auth-submit').textContent=register?'Create account':'Sign in';
+  for(const [id,active] of [['auth-login',!register],['auth-register',register]]){
+    $(id).classList.toggle('selected',active);
+    $(id).setAttribute('aria-pressed',String(active));
+  }
+  note('');
 }
+$('auth-login').addEventListener('click',()=>authMode(false));
+$('auth-register').addEventListener('click',()=>authMode(true));
+$('auth-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  action(event.submitter,async()=>{
+    const data={email:$('auth-email').value,password:$('auth-password').value};
+    if(registering){
+      data.name=$('auth-name').value;
+      data.ownerToken=$('auth-owner-token').value;
+    }
+    const view=await request(registering?'/api/auth/register':'/api/auth/login',data);
+    event.target.reset();
+    draw(view);
+    window.scrollTo(0,0);
+  });
+});
+$('set-password-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  action(event.submitter,async()=>{
+    const view=await request('/api/auth/set-password',{password:$('new-password').value});
+    event.target.reset();
+    draw(view);
+    note('Password saved. You can now sign in with your email and password.');
+  });
+});
 refresh().catch(error=>note(error.message,true));
 setInterval(()=>{if(!document.hidden&&current?.user&&!ownerOpen)refresh().catch(()=>{});},2500);

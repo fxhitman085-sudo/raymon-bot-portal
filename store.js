@@ -25,7 +25,10 @@ class Store {
       );
       CREATE TABLE IF NOT EXISTS owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), user_id TEXT NOT NULL REFERENCES users(id));
       CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS oauth (state TEXT PRIMARY KEY, verifier TEXT NOT NULL, expires INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS users_login_email ON users(lower(email));
+      CREATE TABLE IF NOT EXISTS passwords (
+        email TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE REFERENCES users(id), digest TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS ledger (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), delta INTEGER NOT NULL,
         kind TEXT NOT NULL, reason TEXT NOT NULL, actor TEXT, created INTEGER NOT NULL
@@ -55,17 +58,36 @@ class Store {
     this.run('INSERT INTO ledger VALUES (?,?,?,?,?,?,?)',id,userId,delta,kind,reason,actor,this.clock());
     this.run('UPDATE users SET coins=coins+? WHERE id=?',delta,userId);
   }
-  signIn({sub,email,email_verified,name}){
-    if(email_verified!==true||typeof sub!=='string'||!sub||sub.length>255||typeof email!=='string'||email.length>254)
-      throw new PortalError(403,'Sign in with a verified Google account.');
-    email=email.toLowerCase();
+  password(email){return this.get('SELECT user_id,digest FROM passwords WHERE email=?',email);}
+  hasPassword(userId){return !!this.get('SELECT 1 FROM passwords WHERE user_id=?',userId);}
+  register({email,name,digest,ownerAuthorized=false}){
     return this.tx(()=>{
-      const now=this.clock();
-      const {changes}=this.run('INSERT OR IGNORE INTO users(id,email,name,created) VALUES (?,?,?,?)',sub,email,String(name||'Member').slice(0,90),now);
-      if(changes)this.credit(sub,10,'starter','One-time starter coins',null,'starter:'+sub);
-      this.run('UPDATE users SET email=?,name=? WHERE id=?',email,String(name||'Member').slice(0,90),sub);
-      if(email===OWNER_EMAIL)this.run('INSERT OR IGNORE INTO owner VALUES (1,?)',sub);
-      return this.user(sub);
+      const isOwner=email===OWNER_EMAIL;
+      if(isOwner&&!ownerAuthorized)throw new PortalError(403,'The owner account requires its setup token.');
+      const pinned=isOwner&&this.get('SELECT user_id FROM owner WHERE singleton=1');
+      const existing=this.get('SELECT id FROM users WHERE lower(email)=?',email);
+      const priorOwner=pinned&&this.user(pinned.user_id);
+      if(this.password(email)||(priorOwner&&this.hasPassword(priorOwner.id))||(existing&&!isOwner))
+        throw new PortalError(409,'This account already exists. Sign in or use your existing session to set a password.');
+      if(isOwner&&existing&&existing.id!==priorOwner?.id)
+        throw new PortalError(409,'This email is tied to an existing account.');
+      const id=priorOwner?.id||randomUUID();
+      if(!priorOwner){
+        this.run('INSERT INTO users(id,email,name,created) VALUES (?,?,?,?)',id,email,name,this.clock());
+        this.credit(id,10,'starter','One-time starter coins',null,'starter:'+id);
+        if(isOwner)this.run('INSERT INTO owner VALUES (1,?)',id);
+      }
+      this.run('INSERT INTO passwords VALUES (?,?,?)',email,id,digest);
+      return this.user(id);
+    });
+  }
+  setPasswordForSession(userId,email,digest){
+    return this.tx(()=>{
+      const user=this.requireActive(userId);
+      if(this.hasPassword(userId)||this.password(email))throw new PortalError(409,'A password is already configured.');
+      if(email===OWNER_EMAIL&&!user.is_owner)throw new PortalError(403,'Owner setup is restricted.');
+      this.run('INSERT INTO passwords VALUES (?,?,?)',email,userId,digest);
+      return user;
     });
   }
   user(id){return this.get('SELECT u.*, EXISTS(SELECT 1 FROM owner WHERE user_id=u.id) AS is_owner FROM users u WHERE id=?',id);}
@@ -80,18 +102,6 @@ class Store {
     return row?this.user(row.user_id):null;
   }
   logout(token){if(token)this.run('DELETE FROM sessions WHERE token=?',hash(token));}
-  putOAuth(state,verifier){
-    const now=this.clock();
-    this.run('DELETE FROM oauth WHERE expires<=?',now);
-    this.run('INSERT INTO oauth VALUES (?,?,?)',hash(state),verifier,now+600_000);
-  }
-  takeOAuth(state){
-    return this.tx(()=>{
-      const row=this.get('SELECT verifier FROM oauth WHERE state=? AND expires>?',hash(state),this.clock());
-      this.run('DELETE FROM oauth WHERE state=?',hash(state));
-      return row?.verifier;
-    });
-  }
   deployment(userId){return this.get('SELECT * FROM deployments WHERE user_id=?',userId);}
   requireActive(userId){
     const user=this.user(userId);
@@ -183,7 +193,7 @@ class Store {
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&d.pair_until>now&&!user.banned?code.value:null};
     }
-    return {user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned},deployment,history:this.history(user.id),price:PRICE};
+    return {user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment,history:this.history(user.id),price:PRICE};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
   ownerData(search='',id){

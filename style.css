@@ -76,3 +76,13 @@ td .small{display:block;overflow-wrap:anywhere}
 .audit{margin-top:23px}
 @media(max-width:760px){.shell{width:calc(100% - 32px)}.nav{height:61px}.nav-note{display:none}.landing{grid-template-columns:1fr;gap:34px;padding:52px 0 42px}.panels{grid-template-columns:1fr}.metrics{gap:8px}.metric{padding:12px 10px;min-height:105px}.metric>p{font-size:.63rem}.metric>.medium{font-size:1rem}.metric>span{font-size:.73rem}.desk-head{align-items:start;flex-direction:column;padding-top:26px}.panel{padding:18px}.owner-form{grid-template-columns:1fr 1fr}.feature{padding:19px}footer{flex-wrap:wrap}}
 @media(max-width:390px){.metrics{grid-template-columns:1fr 1fr}.metric:last-child{grid-column:1/-1;min-height:84px}.owner-form{grid-template-columns:1fr}}
+
+.auth-tabs{margin:15px 0}
+#auth-form{display:grid;gap:11px}
+#auth-form .button.primary{width:100%;margin-top:4px}
+#auth-form details{color:var(--muted);font-size:.8rem}
+#auth-form summary{cursor:pointer}
+#auth-form details label{margin-top:7px}
+#auth-password-hint{margin:0}
+.password-setup{margin-bottom:17px}
+#set-password-form input{max-width:360px;margin-right:10px;margin-bottom:9px}
