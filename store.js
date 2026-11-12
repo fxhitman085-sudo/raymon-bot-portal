@@ -2,6 +2,7 @@ const {DatabaseSync}=require('node:sqlite');
 const {randomUUID,createHash}=require('node:crypto');
 
 const DAY=86_400_000, PRICE=10, PAIR_WINDOW=180_000;
+const LOW_BALANCE_WINDOW=6*60*60_000, RESET_WINDOW=30*60_000;
 const OWNER_EMAIL='abdulganiy346@gmail.com';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 class PortalError extends Error {
@@ -14,6 +15,7 @@ class Store {
     this.maxBots=maxBots;
     this.db=new DatabaseSync(file);
     this.codes=new Map();
+    this.workerSeen=null;
     this.db.exec(`
       PRAGMA foreign_keys=ON;
       PRAGMA journal_mode=WAL;
@@ -44,6 +46,19 @@ class Store {
       CREATE TABLE IF NOT EXISTS audit (
         id TEXT PRIMARY KEY, actor TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, reason TEXT NOT NULL, created INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS transfers (
+        sender TEXT NOT NULL REFERENCES users(id), request_id TEXT NOT NULL,
+        recipient TEXT NOT NULL REFERENCES users(id), email TEXT NOT NULL, amount INTEGER NOT NULL,
+        PRIMARY KEY(sender,request_id)
+      );
+      CREATE TABLE IF NOT EXISTS password_resets (
+        token TEXT PRIMARY KEY, email TEXT NOT NULL REFERENCES passwords(email),
+        expires INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS password_resets_email ON password_resets(email);
+      CREATE TABLE IF NOT EXISTS renewal_notices (
+        deployment_id TEXT PRIMARY KEY REFERENCES deployments(id), paid_until INTEGER NOT NULL
+      );
     `);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
@@ -58,7 +73,52 @@ class Store {
     this.run('INSERT INTO ledger VALUES (?,?,?,?,?,?,?)',id,userId,delta,kind,reason,actor,this.clock());
     this.run('UPDATE users SET coins=coins+? WHERE id=?',delta,userId);
   }
+  transfer(senderId,email,amount,requestId){
+    if(!Number.isSafeInteger(amount)||amount<1||amount>1_000_000||
+      typeof requestId!=='string'||!/^[a-f0-9-]{36}$/.test(requestId))
+      throw new PortalError(400,'Enter a whole amount between 1 and 1,000,000 coins.');
+    return this.tx(()=>{
+      const sender=this.requireActive(senderId);
+      const prior=this.get('SELECT email,amount FROM transfers WHERE sender=? AND request_id=?',senderId,requestId);
+      if(prior){
+        if(prior.email!==email||prior.amount!==amount)throw new PortalError(409,'This transfer has already been submitted.');
+        return;
+      }
+      const recipient=this.get(`SELECT u.* FROM users u JOIN passwords p ON p.user_id=u.id
+        WHERE p.email=? AND u.banned=0`,email);
+      if(!recipient)throw new PortalError(404,'No eligible portal account matches that email address.');
+      if(recipient.id===sender.id)throw new PortalError(400,'Choose a different recipient.');
+      if(sender.coins<amount)throw new PortalError(409,'You do not have enough coins for this transfer.');
+      if(recipient.coins+amount>1_000_000)throw new PortalError(409,'This transfer would exceed the recipient’s balance limit.');
+      this.run('INSERT INTO transfers VALUES (?,?,?,?,?)',senderId,requestId,recipient.id,email,amount);
+      this.credit(sender.id,-amount,'transfer_out','Coins sent to '+email,sender.id);
+      this.credit(recipient.id,amount,'transfer_in','Coins received from '+sender.email,sender.id);
+    });
+  }
   password(email){return this.get('SELECT user_id,digest FROM passwords WHERE email=?',email);}
+  issuePasswordReset(email,token){
+    return this.tx(()=>{
+      if(!this.password(email))return false;
+      const now=this.clock();
+      this.run('DELETE FROM password_resets WHERE expires<=?',now);
+      this.run('INSERT INTO password_resets VALUES (?,?,?)',hash(token),email,now+RESET_WINDOW);
+      return true;
+    });
+  }
+  passwordReset(token){
+    if(typeof token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(token))return null;
+    return this.get('SELECT email FROM password_resets WHERE token=? AND expires>?',hash(token),this.clock());
+  }
+  resetPassword(token,digest){
+    this.tx(()=>{
+      const reset=this.passwordReset(token);
+      if(!reset)throw new PortalError(400,'This reset link is invalid or expired. Request a new one.');
+      const {user_id:id}=this.password(reset.email);
+      this.run('UPDATE passwords SET digest=? WHERE email=?',digest,reset.email);
+      this.run('DELETE FROM sessions WHERE user_id=?',id);
+      this.run('DELETE FROM password_resets WHERE email=?',reset.email);
+    });
+  }
   hasPassword(userId){return !!this.get('SELECT 1 FROM passwords WHERE user_id=?',userId);}
   register({email,name,digest,ownerAuthorized=false}){
     return this.tx(()=>{
@@ -181,8 +241,25 @@ class Store {
     if(user.banned)return 'suspended';
     if(d.intent==='pair'&&d.pair_until<=now)return 'expired';
     if(d.intent==='run'&&d.paid_until<=now&&user.coins<PRICE)return 'low_balance';
-    if(d.state==='online'&&d.last_seen+12_000<=now)return 'connecting';
+    if(d.intent==='run'&&(d.state==='connecting'||(d.state==='online'&&d.last_seen+12_000<=now)))return 'reconnecting';
     return d.state;
+  }
+  lowBalance(d,user,now=this.clock()){
+    return !user.banned&&d.intent==='run'&&d.linked&&user.coins<PRICE&&
+      d.paid_until>now&&d.paid_until<=now+LOW_BALANCE_WINDOW;
+  }
+  pendingRenewalNotices(){
+    const now=this.clock();
+    return this.all(`SELECT d.id,d.paid_until,p.email FROM deployments d
+      JOIN users u ON u.id=d.user_id JOIN passwords p ON p.user_id=u.id
+      LEFT JOIN renewal_notices n ON n.deployment_id=d.id AND n.paid_until=d.paid_until
+      WHERE d.intent='run' AND d.linked=1 AND u.banned=0 AND u.coins<?
+      AND d.paid_until>? AND d.paid_until<=? AND n.deployment_id IS NULL
+      ORDER BY d.paid_until`,PRICE,now,now+LOW_BALANCE_WINDOW);
+  }
+  markRenewalNotice(id,paidUntil){
+    this.run(`INSERT INTO renewal_notices VALUES (?,?) ON CONFLICT(deployment_id)
+      DO UPDATE SET paid_until=excluded.paid_until WHERE excluded.paid_until>renewal_notices.paid_until`,id,paidUntil);
   }
   dashboard(user){
     const d=this.deployment(user.id),now=this.clock();
@@ -190,6 +267,10 @@ class Store {
     if(d){
       const code=this.codes.get(d.id);
       deployment={phone:d.phone,state:this.state(d,user,now),linked:!!d.linked,paidUntil:d.paid_until||null,
+        nextRenewal:d.intent==='run'&&d.linked&&d.paid_until>now&&!user.banned?d.paid_until:null,
+        lowBalanceAlert:this.lowBalance(d,user,now),
+        workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
+        lastSeen:d.last_seen||null,
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&d.pair_until>now&&!user.banned?code.value:null};
     }
@@ -207,7 +288,7 @@ class Store {
   sync(reports){
     const now=this.clock();
     for(const [id,code] of this.codes)if(code.expires<=now)this.codes.delete(id);
-    return this.tx(()=>{
+    const deployments=this.tx(()=>{
       this.run("UPDATE deployments SET intent='pause',state='expired' WHERE intent='pair' AND pair_until<=?",now);
       for(const report of reports)this.report(report,now);
       const active=this.all(`SELECT d.*,u.coins FROM deployments d JOIN users u ON u.id=d.user_id
@@ -217,6 +298,8 @@ class Store {
       return active.map(d=>({id:d.id,phone:d.phone,generation:d.generation,intent:d.intent,
         pairUntil:d.pair_until,permitUntil:d.paid_until>now?Math.min(d.paid_until,now+12_000):0}));
     });
+    this.workerSeen=now;
+    return deployments;
   }
   report(r,now){
     if(!r||typeof r.id!=='string'||typeof r.generation!=='string')return;

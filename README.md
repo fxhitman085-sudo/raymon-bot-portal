@@ -6,6 +6,8 @@ A separate website and WhatsApp worker. Email and password sign-in, private What
 
 Deploy the portal from this repository using the supplied Dockerfile. On Railway, `npm start` or `node server.js` starts the website and its pairing worker together by default. Use one replica and the existing public domain and `WORKER_TOKEN`. Keep `PORTAL_DATA_DIR` pointed at its existing persistent volume so accounts and balances survive redeployments. By default, worker sessions are stored in the `worker` directory under `PORTAL_DATA_DIR`. If `WORKER_DATA_DIR` is set, point it at persistent storage too.
 
+On the combined service, the default data directory is `/app/data/portal`. Before redeploying an existing service, verify that its volume covers the configured database and session paths. If the existing deployment uses ephemeral storage, take a consistent SQLite backup and a private backup of the `worker` directory before adding a volume or redeploying. Restore both into the persistent paths before allowing sign-ups or pairing. With no explicit `PORTAL_DATA_DIR`, the portal uses `RAILWAY_VOLUME_MOUNT_PATH` if the volume does not already cover the default directory. A new combined service can mount its volume at `/app/data/portal`. Startup logs warn when the configured directories are outside the Railway volume.
+
 Set the health check to `/health`. After deployment, check the logs for `Portal pairing worker connected to the portal.` and request a fresh pairing code from the dashboard. The combined service uses a loopback connection and determines its port automatically.
 
 ### Optional separate worker service
@@ -26,7 +28,13 @@ Set the portal service's health check to `/health`. Configure the worker's inter
 
 Set `OWNER_SIGNUP_TOKEN` on the **website service** to a new random secret of at least 32 characters, different from `WORKER_TOKEN`. Deploy the change, then select **Create account** on the website with the owner email configured in `store.js`. Under **Setting up the owner account?**, enter the setup token and choose a unique password of at least 12 characters. The token cannot replace an existing owner password. After the owner can sign in, remove the setup token from the website variables. Ordinary sign-ups need only a name, email, and password.
 
-The migration preserves account IDs, balances, bot deployments, and valid sessions on the existing database. A user still signed in from the old system can set a password in their dashboard. The pinned owner can migrate with the setup token. An older account without a valid session cannot be claimed by entering its email. Email delivery, verification, and self-service password resets are not configured.
+The migration preserves account IDs, balances, bot deployments, and valid sessions on the existing database. A user still signed in from the old system can set a password in their dashboard. The pinned owner can migrate with the setup token. Password recovery is available for accounts with password sign-in configured.
+
+### Password recovery and low-balance email
+
+Set `RESEND_API_KEY` and `PORTAL_EMAIL_FROM` on the website service. Use an email address on a verified Resend sending domain for `PORTAL_EMAIL_FROM`, such as `Raymon Bot <portal@example.com>`. Keep the API key in Railway variables. `PUBLIC_ORIGIN` must match the live portal domain because reset emails link back to it.
+
+Use **Forgot password?** on the sign-in page. Reset links expire after 30 minutes and a successful reset signs out existing sessions. The dashboard warns when an active bot has fewer than 10 coins within six hours of renewal. If email is configured, the portal also sends one warning per affected paid period to the account email. The dashboard warning works with no email configuration.
 
 Use a spare WhatsApp number that is absent from your existing Bot-Hosting.net deployment. Check that pairing completes and `.ping` responds; verify the 10-coin first charge, pause/resume, owner grants and removal, and suspension. Keep the existing deployment's repository, environment, number, and session directories separate. Do not copy its authentication files to this project.
 
@@ -37,6 +45,7 @@ Use a spare WhatsApp number that is absent from your existing Bot-Hosting.net de
 - When paid time expires the worker renews only while connected and with enough coins. The same paid period cannot be charged twice. If the wallet cannot renew, the bot stops and saved credentials remain. Adding enough coins to an eligible low-balance bot lets it reconnect automatically.
 - Pausing manually or being banned stops the bot. The existing paid period continues to elapse. Unbanning restores dashboard actions; the user chooses Resume. If WhatsApp unlinks the session the portal offers a new code.
 - Owner coin adjustments require a reason and are audited. V1 has no checkout; the owner grants and removes coins. The portal's owner role does not grant access to any user's WhatsApp messages or pairing code.
+- Users can send whole coins to another active password-enabled account using its portal email. Both wallets get a ledger entry and the transfer completes as one transaction.
 - The worker polls the web service and stops responding when its short authorization expires. Railway failures can affect portal bots; the existing Bot-Hosting.net deployment does not depend on the portal.
 
 ## Local checks
