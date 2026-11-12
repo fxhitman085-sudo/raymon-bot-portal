@@ -86,3 +86,9 @@ td .small{display:block;overflow-wrap:anywhere}
 #auth-password-hint{margin:0}
 .password-setup{margin-bottom:17px}
 #set-password-form input{max-width:360px;margin-right:10px;margin-bottom:9px}
+#low-balance-alert{margin:0 0 17px}
+#transfer-panel{margin-top:14px;padding:12px 0;border-top:1px solid var(--line)}
+#transfer-panel summary{cursor:pointer;color:var(--green);font-weight:650}
+#transfer-form,#transfer-review,#recovery-form,#reset-form{margin-top:14px}
+#transfer-form input,#recovery-form input,#reset-form input{margin-bottom:12px}
+#transfer-description{overflow-wrap:anywhere}

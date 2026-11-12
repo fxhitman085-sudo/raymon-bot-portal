@@ -25,6 +25,39 @@ function emailAddress(value){
   const mailbox=local.split('+')[0].replace(/\./g,'');
   return /^[a-z0-9]+$/.test(mailbox)?mailbox+'@gmail.com':null;
 }
+function createMailer(apiKey,from){
+  if(!apiKey||!from)return null;
+  return async({to,subject,text,id})=>{
+    const response=await fetch('https://api.resend.com/emails',{
+      method:'POST',signal:AbortSignal.timeout(10_000),
+      headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json',...(id?{'Idempotency-Key':id}:{})},
+      body:JSON.stringify({from,to:[to],subject,text})
+    });
+    if(!response.ok)throw new Error('Email provider rejected delivery.');
+  };
+}
+function startRenewalNotices(store,sendMail,origin){
+  let active,stopping=false;
+  async function deliver(){
+    for(const notice of store.pendingRenewalNotices()){
+      if(stopping)break;
+      const {id,paid_until:paidUntil,email}=notice;
+      try{
+        await sendMail({to:email,subject:'RAYMON BOT needs coins before renewal',id:'renewal/'+id+'/'+paidUntil,
+          text:'Your bot needs 10 coins to renew. Its current time ends at '+new Date(paidUntil).toUTCString()+
+            '. It will pause if your balance is below 10 coins at renewal. View your balance and local renewal time at '+origin+'/'});
+        store.markRenewalNotice(id,paidUntil);
+      }catch{console.error('Could not send a low-balance email. Will retry.');}
+    }
+  }
+  function tick(){
+    if(!active)active=deliver().catch(()=>console.error('Could not check renewal notices.')).finally(()=>{active=null;});
+  }
+  const timer=setInterval(tick,60_000);
+  timer.unref();
+  tick();
+  return async()=>{stopping=true;clearInterval(timer);await active;};
+}
 function newPassword(value){
   if(typeof value!=='string'||value.length<12||value.length>128)
     throw new PortalError(400,'Choose a password with 12 to 128 characters.');
@@ -45,7 +78,7 @@ async function body(req){
   try{return JSON.parse(Buffer.concat(parts));}catch{throw new PortalError(400,'Invalid JSON.');}
 }
 
-function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=false}){
+function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=false,sendMail=null}){
   const base=new URL(origin), secure=base.protocol==='https:';
   if(!secure&&!['localhost','127.0.0.1'].includes(base.hostname))throw new Error('PUBLIC_ORIGIN must use HTTPS.');
   if(base.origin!==origin)throw new Error('PUBLIC_ORIGIN must be an origin without a trailing slash.');
@@ -62,7 +95,7 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
     }
     const forwarded=String(req.headers['x-real-ip']||'').trim();
     const ip=railwayProxy&&isIP(forwarded)?forwarded:req.socket.remoteAddress;
-    for(const [key,limit] of [['ip:'+ip,30],[action+':'+email,8]]){
+    for(const [key,limit] of [['ip:'+ip,30],[action+':'+email,action==='forgot-password'?4:8]]){
       let entry=attempts.get(key);
       if(!entry||entry.until<=now){
         if(attempts.size>=10_000)throw new PortalError(429,'Too many requests. Try again later.');
@@ -109,8 +142,32 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       if(!route.startsWith('/api/'))throw new PortalError(404,'Page not found.');
       const session=cookieValue(req,sessionName);
       const user=store.session(session);
-      if(method==='GET'&&route==='/api/me')return json(res,200,user?store.dashboard(user):{user:null});
+      if(method==='GET'&&route==='/api/me')return json(res,200,user?store.dashboard(user):{user:null,recoveryAvailable:!!sendMail});
       if(method==='POST'&&req.headers.origin!==origin)throw new PortalError(403,'Request origin not allowed.');
+      if(method==='POST'&&route==='/api/auth/forgot-password'){
+        if(!sendMail)throw new PortalError(503,'Password recovery email is not configured. Contact the portal owner.');
+        const data=await body(req), email=emailAddress(data?.email);
+        if(!email)throw new PortalError(400,'Enter a valid email address.');
+        rateLimit(req,email,'forgot-password');
+        const token=random();
+        if(store.issuePasswordReset(email,token)){
+          const link=new URL('/',origin);
+          link.hash='reset='+token;
+          void Promise.resolve().then(()=>sendMail({to:email,subject:'Reset your RAYMON BOT password',
+            text:'Open this link within 30 minutes to choose a new password. If you did not request this, ignore this email.\n\n'+link.href
+          })).catch(()=>console.error('Could not send a password recovery email.'));
+        }
+        return json(res,202,{ok:true});
+      }
+      if(method==='POST'&&route==='/api/auth/reset-password'){
+        const data=await body(req);
+        const reset=store.passwordReset(data?.token);
+        rateLimit(req,reset?.email||'', 'reset-password');
+        if(!reset)throw new PortalError(400,'This reset link is invalid or expired. Request a new one.');
+        store.resetPassword(data.token,await passwordWork(newPassword(data.password)));
+        res.setHeader('Set-Cookie',cookie(sessionName,'',0));
+        return json(res,200,{ok:true});
+      }
       if(method==='POST'&&['/api/auth/register','/api/auth/login'].includes(route)){
         const data=await body(req), email=emailAddress(data?.email);
         const registering=route.endsWith('/register');
@@ -128,7 +185,8 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         if(typeof password!=='string'||password.length>128)throw new PortalError(401,'Email or password is incorrect.');
         const saved=store.password(email);
         const encoded=await passwordWork(password,saved?.digest.split(':')[0]||dummySalt);
-        if(!saved||!equal(encoded,saved.digest))throw new PortalError(401,'Email or password is incorrect.');
+        if(!saved||!equal(encoded,saved.digest)||store.password(email)?.digest!==saved.digest)
+          throw new PortalError(401,'Email or password is incorrect.');
         return finishAuth(res,session,store.user(saved.user_id),200);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
@@ -154,6 +212,13 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         store.control(user.id,data?.action);
         return json(res,200,{ok:true});
       }
+      if(method==='POST'&&route==='/api/transfers'){
+        const data=await body(req), email=emailAddress(data?.email);
+        if(!email)throw new PortalError(400,'Enter the recipient’s portal email address.');
+        rateLimit(req,user.id,'transfer');
+        store.transfer(user.id,email,data.amount,data.requestId);
+        return json(res,200,{ok:true});
+      }
       if(route==='/api/owner'&&method==='GET'){
         if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');
         return json(res,200,store.ownerData(url.searchParams.get('search')||'',url.searchParams.get('user')||undefined));
@@ -176,22 +241,40 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
   return server;
 }
 
+function portalPaths(env,cwd=process.cwd()){
+  const legacy=path.resolve(cwd,'data/portal');
+  const mount=env.RAILWAY_VOLUME_MOUNT_PATH&&path.resolve(cwd,env.RAILWAY_VOLUME_MOUNT_PATH);
+  const withinMount=target=>mount&&(target===mount||target.startsWith(mount.endsWith(path.sep)?mount:mount+path.sep));
+  const dir=env.PORTAL_DATA_DIR?path.resolve(cwd,env.PORTAL_DATA_DIR):(!mount||withinMount(legacy)?legacy:mount);
+  const worker=env.WORKER_DATA_DIR?path.resolve(cwd,env.WORKER_DATA_DIR):path.join(dir,'worker');
+  return {dir,worker,legacy,portalPersistent:!!withinMount(dir),workerPersistent:!!withinMount(worker)};
+}
+
 if(require.main===module){
-  const dir=path.resolve(process.env.PORTAL_DATA_DIR||'./data/portal');
+  const {dir,worker,legacy,portalPersistent,workerPersistent}=portalPaths(process.env);
+  if(!process.env.PORTAL_DATA_DIR&&dir!==legacy&&fs.existsSync(path.join(legacy,'portal.sqlite')))
+    throw new Error('An existing portal database was found outside the selected volume. Back it up and migrate it before switching paths.');
+  if(process.env.RAILWAY_SERVICE_ID&&!portalPersistent)
+    console.error('Portal data is outside a Railway volume. Accounts and coin balances may be lost on redeploy.');
   fs.mkdirSync(dir,{recursive:true,mode:0o700});
   process.umask(0o077);
   const port=Number(process.env.PORT||3000);
   const store=new Store(path.join(dir,'portal.sqlite'),Date.now,Math.max(1,Math.min(30,Number(process.env.MAX_BOTS)||8)));
-  const server=createServer({store,origin:process.env.PUBLIC_ORIGIN||'http://localhost:3000',
+  const origin=process.env.PUBLIC_ORIGIN||'http://localhost:3000';
+  const sendMail=createMailer(process.env.RESEND_API_KEY,process.env.PORTAL_EMAIL_FROM);
+  const server=createServer({store,origin,sendMail,
     ownerSignupToken:process.env.OWNER_SIGNUP_TOKEN,workerToken:process.env.WORKER_TOKEN,railwayProxy:!!process.env.RAILWAY_SERVICE_ID});
   const runWorker=process.env.PORTAL_RUN_WORKER==='1'||
     (!!process.env.RAILWAY_SERVICE_ID&&process.env.PORTAL_RUN_WORKER!=='0');
+  if(runWorker&&process.env.RAILWAY_SERVICE_ID&&!workerPersistent)
+    console.error('Worker sessions are outside a Railway volume. WhatsApp accounts may need to link again after redeploy.');
+  const stopNotices=sendMail&&startRenewalNotices(store,sendMail,origin);
   let stopWorker,closing=false;
   server.listen(port,'::',()=>{
     const actualPort=server.address().port;
     console.log('Raymon portal listening on port '+actualPort);
     if(runWorker)stopWorker=startWorker({
-      root:path.resolve(process.env.WORKER_DATA_DIR||path.join(dir,'worker')),
+      root:worker,
       url:'http://127.0.0.1:'+actualPort,token:process.env.WORKER_TOKEN
     });
   });
@@ -200,10 +283,11 @@ if(require.main===module){
     closing=true;
     const serverClosed=new Promise(resolve=>server.close(resolve));
     await stopWorker?.();
+    await stopNotices?.();
     await serverClosed;
     store.db.close();
   }
   process.once('SIGTERM',()=>void stop());
   process.once('SIGINT',()=>void stop());
 }
-module.exports={createServer};
+module.exports={createServer,portalPaths,startRenewalNotices};

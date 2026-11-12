@@ -40,6 +40,19 @@
             <label for="auth-owner-token">One-time owner setup token</label><input id="auth-owner-token" type="password" autocomplete="off" maxlength="256" disabled>
           </details>
           <button id="auth-submit" class="button primary" type="submit">Sign in</button>
+          <button id="show-recovery" class="button subtle" type="button" hidden>Forgot password?</button>
+        </form>
+        <form id="recovery-form" hidden>
+          <h2>Recover your account</h2>
+          <label for="recovery-email">Portal email address</label>
+          <input id="recovery-email" type="email" autocomplete="email" maxlength="254" required>
+          <div class="actions"><button class="button primary" type="submit">Email me a reset link</button><button id="cancel-recovery" class="button subtle" type="button">Back to sign in</button></div>
+        </form>
+        <form id="reset-form" hidden>
+          <h2>Choose a new password</h2>
+          <label for="reset-password">New password</label>
+          <input id="reset-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+          <div class="actions"><button class="button primary" type="submit">Reset password</button><a class="button subtle" href="/">Back to portal</a></div>
         </form>
       </div>
     </section>
@@ -61,12 +74,14 @@
         <div class="metrics">
           <article class="metric"><p>COIN BALANCE</p><strong id="balance">0</strong><span>coins available</span></article>
           <article class="metric"><p>BOT STATUS</p><strong id="bot-state" class="medium">Not linked</strong><span id="bot-phone">No WhatsApp number</span></article>
-          <article class="metric"><p>PAID THROUGH</p><strong id="paid-until" class="medium">—</strong><span>10 coins per 24 hours</span></article>
+          <article class="metric"><p>NEXT RENEWAL</p><strong id="paid-until" class="medium">—</strong><span id="renewal-detail">10 coins per 24 hours</span></article>
         </div>
+        <p id="low-balance-alert" class="notice" role="status" hidden></p>
         <div class="panels">
           <article class="panel">
             <p class="eyebrow">CONNECTION</p><h2 id="connection-title">Link WhatsApp</h2>
             <p id="connection-info" class="muted">Use a WhatsApp account you control.</p>
+            <p id="connection-diagnostics" class="small" hidden></p>
             <form id="pair-form">
               <label for="phone">WhatsApp number</label>
               <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="24" placeholder="+234 800 000 0000" required>
@@ -80,7 +95,24 @@
             </div>
             <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
           </article>
-          <article class="panel"><p class="eyebrow">WALLET</p><h2>Coin activity</h2><p class="muted">Starter coins, uptime charges and owner adjustments.</p><ul id="history" class="history"></ul></article>
+          <article class="panel">
+            <p class="eyebrow">WALLET</p><h2>Coin activity</h2>
+            <details id="transfer-panel">
+              <summary>Send coins</summary>
+              <form id="transfer-form">
+                <label for="transfer-email">Recipient’s portal email</label>
+                <input id="transfer-email" type="email" maxlength="254" autocomplete="off" required>
+                <label for="transfer-amount">Coins to send</label>
+                <input id="transfer-amount" type="number" min="1" max="1000000" inputmode="numeric" required>
+                <button class="button subtle" type="submit">Review transfer</button>
+              </form>
+              <div id="transfer-review" hidden>
+                <p id="transfer-description"></p>
+                <div class="actions"><button id="confirm-transfer" class="button primary" type="button">Confirm transfer</button><button id="edit-transfer" class="button subtle" type="button">Edit</button></div>
+              </div>
+            </details>
+            <ul id="history" class="history"></ul>
+          </article>
         </div>
       </div>
       <section id="owner-view" class="panel" hidden>
