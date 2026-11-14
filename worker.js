@@ -17,11 +17,14 @@ class Worker {
     this.authorizedUntil=0;
   }
   async tick(){
-    const reports=[...this.entries.values()].map(e=>({
-      id:e.task.id,generation:e.task.generation,
-      status:e.failure||(e.verified&&e.bot?.connected?'online':e.code?'code':'connecting'),
-      ...(e.code?{code:e.code}:{})
-    }));
+    const now=this.clock();
+    const reports=[...this.entries.values()].map(e=>{
+      const code=e.task.intent==='pair'&&e.task.pairUntil>now&&e.bot?.sock===e.codeSocket&&
+        !e.bot?.socketClosed?e.code:null;
+      return {id:e.task.id,generation:e.task.generation,
+        status:e.failure||(e.verified&&e.bot?.connected?'online':code?'code':'connecting'),
+        ...(code?{code}:{})};
+    });
     try{
       const response=await this.fetcher(this.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+this.token},
         body:JSON.stringify({reports}),signal:AbortSignal.timeout(4000)});
@@ -86,7 +89,10 @@ class Worker {
         bot[name]=async(...args)=>allowed()?handle(...args):undefined;
       }
       bot.onPairCode=async code=>{
-        if(entry.task.intent==='pair'&&entry.task.pairUntil>this.clock())entry.code=String(code);
+        if(entry.task.intent==='pair'&&entry.task.pairUntil>this.clock()&&bot.sock&&!bot.socketClosed){
+          entry.code=String(code);
+          entry.codeSocket=bot.sock;
+        }
       };
       bot.onConnected=async()=>{
         const own=bot.authState?.creds?.me?.id||bot.sock?.user?.id;

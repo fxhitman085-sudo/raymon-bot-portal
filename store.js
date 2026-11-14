@@ -2,6 +2,7 @@ const {DatabaseSync}=require('node:sqlite');
 const {randomUUID,createHash}=require('node:crypto');
 
 const DAY=86_400_000, PRICE=10, PAIR_WINDOW=180_000;
+const PAIRING_REPORT_TTL=12_000;
 const LOW_BALANCE_WINDOW=6*60*60_000, RESET_WINDOW=30*60_000;
 const OWNER_EMAIL='abdulganiy346@gmail.com';
 const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -272,7 +273,7 @@ class Store {
         workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
         lastSeen:d.last_seen||null,
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
-        code:d.intent==='pair'&&code?.generation===d.generation&&d.pair_until>now&&!user.banned?code.value:null};
+        code:d.intent==='pair'&&code?.generation===d.generation&&code.expires>now&&!user.banned?code.value:null};
     }
     return {user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment,history:this.history(user.id),price:PRICE};
   }
@@ -308,11 +309,14 @@ class Store {
     const user=this.user(d.user_id);
     if(!user||user.banned)return;
     if(r.status==='code'&&d.intent==='pair'&&/^[A-Z0-9]{8}$/i.test(r.code||'')){
-      this.codes.set(d.id,{generation:d.generation,value:r.code,expires:d.pair_until});
+      this.codes.set(d.id,{generation:d.generation,value:r.code,expires:Math.min(d.pair_until,now+PAIRING_REPORT_TTL)});
       this.run("UPDATE deployments SET state='awaiting_code' WHERE id=?",d.id);
     }else if(['needs_pairing','pair_failed'].includes(r.status)){
       this.codes.delete(d.id);
       this.run("UPDATE deployments SET intent='pause',state=?,linked=0,pair_until=0 WHERE id=?",r.status,d.id);
+    }else if(r.status==='connecting'&&d.intent==='pair'){
+      this.codes.delete(d.id);
+      if(d.state==='awaiting_code')this.run("UPDATE deployments SET state='queued' WHERE id=?",d.id);
     }else if(r.status==='connecting'&&d.intent==='run'){
       this.run("UPDATE deployments SET state='connecting' WHERE id=?",d.id);
     }else if(r.status==='online'){

@@ -40,6 +40,8 @@ test('pairing charges only when online, renews once, and pauses when coins run o
   assert.equal(store.dashboard(store.user(member)).deployment.code,'ABCD1234');
   assert.equal(store.dashboard(store.user(owner)).deployment,null);
   assert.ok(!JSON.stringify(store.ownerData('', member)).includes('ABCD1234'));
+  advance(12_001);
+  assert.equal(store.dashboard(store.user(member)).deployment.code,null);
   store.sync([report(d,'online'),report(d,'online')]);
   assert.equal(store.deployment(member).paid_until,clock()+DAY);
   assert.equal(store.user(member).coins,0);
@@ -279,6 +281,17 @@ test('worker opens isolated auth and gates a bot until paid, then stops it on ba
   assert.equal(await bot.onMessages(),undefined);
   await worker.tick();
   assert.equal(store.dashboard(store.user(member)).deployment.code,'TEST1234');
+  const firstSocket=bot.sock;
+  bot.socketClosed=true;
+  await worker.tick();
+  assert.equal(store.dashboard(store.user(member)).deployment.code,null);
+  bot.sock={...firstSocket};
+  bot.socketClosed=false;
+  await worker.tick();
+  assert.equal(store.dashboard(store.user(member)).deployment.code,null);
+  await bot.onPairCode('NEXT1234');
+  await worker.tick();
+  assert.equal(store.dashboard(store.user(member)).deployment.code,'NEXT1234');
   bot.connected=true;
   await bot.onConnected();
   assert.equal(await bot.onMessages(),undefined);
