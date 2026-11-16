@@ -54,7 +54,7 @@ Use Node 24. Run `npm ci --ignore-scripts`, `npm run build`, and `npm test`. Set
 
 ## Keep website-deployed bots on the same release
 
-The **Sync RAYMON BOT** workflow reads `variefx-alt/raymon-whatsapp-bot/main`. It checks for changes approximately every 15 minutes and can also be run on demand from Actions. A `repository_dispatch` event of type `raymon-bot-updated` can trigger it immediately from the source repository. It only publishes a new portal commit after the tests and Docker build pass.
+The **Sync RAYMON BOT** workflow reads `variefx-alt/raymon-whatsapp-bot/main`. It checks for changes approximately every 30 minutes and can also be run on demand from Actions. A `repository_dispatch` event of type `raymon-bot-updated` can trigger it immediately from the source repository. It only publishes a new portal commit after the tests and Docker build pass.
 
 Add two secrets in the portal repository under **Settings → Secrets and variables → Actions**:
 

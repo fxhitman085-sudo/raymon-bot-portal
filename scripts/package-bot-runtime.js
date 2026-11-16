@@ -24,7 +24,7 @@ for(const [name,version] of Object.entries(runtimePackage.dependencies||{})){
   }
 }
 
-const include=['config.js','commands','lib','assets'];
+const include=['config.js','commands','lib','assets','releases'];
 const fileNames=[];
 for(const entry of git('ls-tree','-r','-z',commit,'--',...include).toString().split('\0').filter(Boolean)){
   const tab=entry.indexOf('\t');
@@ -33,9 +33,9 @@ for(const entry of git('ls-tree','-r','-z',commit,'--',...include).toString().sp
   if(!['100644','100755'].includes(mode)||type!=='blob')throw Error('Unexpected entry in runtime source: '+file);
   if(/(?:^|\/)\./.test(file)||!/^[-a-zA-Z0-9_./]+$/.test(file))throw Error('Unexpected runtime file name: '+file);
   if(file==='config.js'||/^(?:commands|lib)\/.*\.(?:js|cjs|mjs|json)$/.test(file)||
-      /^assets\/.*\.(?:png|jpe?g|gif|webp|mp4|svg|ttf|woff2)$/i.test(file))fileNames.push(file);
+      /^releases\/.*\.json$/.test(file)||/^assets\/.*\.(?:png|jpe?g|gif|webp|mp4|svg|ttf|woff2)$/i.test(file))fileNames.push(file);
 }
-for(const file of ['config.js','lib/bot.js','lib/database.js','lib/updates.js','assets/announcements.jpg']){
+for(const file of ['config.js','lib/bot.js','lib/database.js','lib/updates.js','releases/current.json','assets/announcements.jpg']){
   if(!fileNames.includes(file))throw Error('Bot checkout is missing '+file);
 }
 const archive=gzipSync(git('archive','--format=tar',commit,'--',...fileNames),{level:9});

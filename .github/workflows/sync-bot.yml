@@ -1,7 +1,7 @@
 name: Sync RAYMON BOT
 on:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '7,37 * * * *'
   workflow_dispatch:
   repository_dispatch:
     types: [raymon-bot-updated]
