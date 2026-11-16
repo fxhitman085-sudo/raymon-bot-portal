@@ -1,0 +1,73 @@
+name: Sync RAYMON BOT
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+  repository_dispatch:
+    types: [raymon-bot-updated]
+permissions:
+  contents: read
+concurrency:
+  group: raymon-runtime-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check repository access is configured
+        id: access
+        env:
+          BOT_READ_TOKEN: ${{ secrets.BOT_READ_TOKEN }}
+          PORTAL_SYNC_TOKEN: ${{ secrets.PORTAL_SYNC_TOKEN }}
+        run: |
+          if [[ -z "$BOT_READ_TOKEN" || -z "$PORTAL_SYNC_TOKEN" ]]; then
+            echo "::notice::Add BOT_READ_TOKEN and PORTAL_SYNC_TOKEN to enable automatic runtime updates."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.ready == 'true'
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        if: steps.access.outputs.ready == 'true'
+        with:
+          repository: variefx-alt/raymon-whatsapp-bot
+          ref: main
+          path: upstream-bot
+          token: ${{ secrets.BOT_READ_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.access.outputs.ready == 'true'
+        with:
+          node-version: '24'
+      - name: Package bot source
+        id: bundle
+        if: steps.access.outputs.ready == 'true'
+        run: |
+          node scripts/package-bot-runtime.js upstream-bot
+          if ! git diff --quiet -- bot-runtime.tar.gz || [[ -n "$(git status --porcelain -- bot-runtime-version.json)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify candidate
+        if: steps.bundle.outputs.changed == 'true'
+        run: |
+          rm -rf upstream-bot bot-runtime
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm test
+          docker build .
+      - name: Publish tested bundle to main
+        if: steps.bundle.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PORTAL_SYNC_TOKEN }}
+        run: |
+          source_sha="$(node -p "require('./bot-runtime-version.json').commit")"
+          gh auth setup-git
+          git config user.name 'RAYMON BOT Runtime Sync'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- bot-runtime.tar.gz bot-runtime-version.json
+          git commit -m "Sync bot runtime to ${source_sha:0:12}"
+          git push origin HEAD:refs/heads/main

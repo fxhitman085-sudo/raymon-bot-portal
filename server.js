@@ -133,6 +133,10 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         return;
       }
       if(method==='GET'&&route==='/health')return json(res,200,{ok:true});
+      if(method==='GET'&&route==='/version'){
+        const {repository,commit}=require('./bot-runtime-version.json');
+        return json(res,200,{repository,commit});
+      }
       if(method==='POST'&&route==='/internal/sync'){
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
         const data=await body(req,5*1024*1024);
