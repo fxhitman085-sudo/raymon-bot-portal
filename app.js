@@ -33,6 +33,99 @@ function fillHistory(list,rows){
     list.append(line);
   }
 }
+const settingsSections=[
+  ['General',[['mode','Who can use the bot',['private','public']],['prefix','Command prefix','text',4],
+    ['commandReaction','Command reaction emoji (blank turns it off)','text',40]]],
+  ['Status',[['statusView','Automatically view statuses','checkbox'],['statusReact','Automatically react to statuses','checkbox'],
+    ['statusReactionStyle','Reaction style',['heart','emoji']],['statusEmojiMode','Emoji choice',['random','fixed']],
+    ['statusEmoji','Fixed emoji','text',40],['statusEmojis','Custom emoji list','text',840],
+    ['statusExclusions','Excluded numbers (with country codes)','textarea',8500]]],
+  ['Replies',[['autoReply','AI auto-reply','checkbox'],['awayEnabled','Enable away replies','checkbox'],
+    ['awayActive','Away now','checkbox'],['awayAutomatic','Go away after 15 minutes of inactivity','checkbox'],
+    ['awayMessage','Away message','textarea',1000]]],
+  ['Updates',[['updateAlerts','Automatic update alerts','checkbox']]]
+];
+const emojiSegments=new Intl.Segmenter(undefined,{granularity:'grapheme'});
+function buildSettings(container,variant,values){
+  container.replaceChildren();
+  const inputs=new Map(),rows=new Map();
+  for(const [name,fields] of settingsSections){
+    const section=element('details',undefined,'settings-section');
+    section.open=name==='General';
+    section.append(element('summary',name));
+    for(const [key,label,type,limit] of fields){
+      if(variant==='setup'&&key==='awayActive')continue;
+      const toggle=type==='checkbox',row=element('div',undefined,toggle?'settings-toggle':'');
+      const field=element(Array.isArray(type)?'select':type==='textarea'?'textarea':'input');
+      const caption=element('label',label);
+      field.id=variant+'-'+key;
+      caption.htmlFor=field.id;
+      if(Array.isArray(type)){
+        for(const choice of type){
+          const option=element('option',choice[0].toUpperCase()+choice.slice(1));
+          option.value=choice;field.append(option);
+        }
+      }else if(field.tagName==='INPUT')field.type=type;
+      else field.rows=3;
+      if(limit)field.maxLength=limit;
+      if(toggle){field.setAttribute('role','switch');field.checked=values[key];}
+      else field.value=Array.isArray(values[key])?values[key].join(key==='statusExclusions'?'\n':' '):values[key];
+      row.append(caption,field);section.append(row);
+      inputs.set(key,field);rows.set(key,row);
+    }
+    container.append(section);
+  }
+  const update=()=>{
+    const react=inputs.get('statusReact').checked;
+    const custom=react&&inputs.get('statusReactionStyle').value==='emoji';
+    const fixed=inputs.get('statusEmojiMode').value==='fixed';
+    rows.get('statusReactionStyle').hidden=!react;
+    rows.get('statusEmojiMode').hidden=!custom;
+    rows.get('statusEmoji').hidden=!custom||!fixed;
+    rows.get('statusEmojis').hidden=!custom||fixed;
+    if(rows.has('awayActive'))rows.get('awayActive').hidden=!inputs.get('awayEnabled').checked;
+  };
+  for(const input of inputs.values())input.addEventListener('change',update);
+  update();
+  return ()=>{
+    const patch={};
+    for(const [key,input] of inputs){
+      if(rows.get(key).hidden)continue;
+      let value=input.type==='checkbox'?input.checked:input.value.trim();
+      if(key==='statusEmojis')value=[...new Set([...emojiSegments.segment(value)].map(part=>part.segment).filter(item=>item.trim()))];
+      if(key==='statusExclusions')value=[...new Set(value.split(/[\s,]+/).filter(Boolean).map(phone=>phone.replace(/^\+/,'')))];
+      if(JSON.stringify(value)!==JSON.stringify(values[key]))patch[key]=value;
+    }
+    return patch;
+  };
+}
+
+let customize=false,readSetup,readEdit,editorBot,editorSnapshot,editingDirty=false,pairBusy=false;
+function resetSetup(){
+  customize=false;
+  $('number-step').hidden=false;
+  $('customize-step').hidden=true;
+}
+function drawSettings(data,bot){
+  const panel=$('bot-settings-panel');
+  panel.hidden=data.user.banned||!bot?.linked;
+  if(panel.hidden||editorBot!==bot.id){
+    panel.open=false;
+    editorBot=bot?.id;
+    editingDirty=false;
+    editorSnapshot=undefined;
+    clearGroups();
+  }
+  if(panel.hidden)return;
+  const snapshot=JSON.stringify(bot.settings.values);
+  if(!editingDirty&&snapshot!==editorSnapshot){
+    editorSnapshot=snapshot;
+    readEdit=buildSettings($('edit-settings'),'edit',bot.settings.values);
+  }
+  const message=bot.settings.pending?'Saved · waiting for the bot to apply changes.':
+    !bot.settings.synced?'Waiting for the bot to share its current settings.':'';
+  if($('settings-status').textContent!==message)$('settings-status').textContent=message;
+}
 function draw(data){
   current=data;
   const {user,deployments=[]}=data;
@@ -65,6 +158,7 @@ function draw(data){
         addingBot=false;
         selectedBotId=bot.id;
         $('phone').value='';
+        resetSetup();
         draw(current);
       });
       cards.append(card);
@@ -84,6 +178,8 @@ function draw(data){
   const pending=!!d?.pairingExpires;
   const canLink=!user.banned&&!d?.linked&&!pending;
   $('pair-form').hidden=!canLink;
+  $('link-art').hidden=!!d?.linked||user.banned;
+  drawSettings(data,d);
   if(canLink&&d?.phone&&!$('phone').value)$('phone').value=d.phone;
   $('pair-code-area').hidden=!d?.code;
   $('pair-code').textContent=d?.code||'';
@@ -126,21 +222,121 @@ async function action(button,callback){
 }
 $('add-bot').addEventListener('click',()=>{
   addingBot=true;
+  resetSetup();
   $('phone').value='';
   draw(current);
   $('phone').focus();
 });
+const normalizedPhone=()=>$('phone').value.trim().replace(/[ ()-]/g,'');
+async function requestPair(button,settings){
+  if(pairBusy)return;
+  pairBusy=true;
+  try{
+    await action(button,async()=>{
+      const phone=normalizedPhone(),add=addingBot||!selectedBotId;
+      const target=add?{phone,add:true}:{phone,deploymentId:selectedBotId};
+      await request('/api/pair',{...target,...(settings&&{settings})});
+      const view=await request('/api/me');
+      selectedBotId=view.deployments.find(bot=>bot.phone===phone)?.id;
+      addingBot=false;
+      resetSetup();
+      $('phone').value='';
+      draw(view);
+    });
+  }finally{pairBusy=false;}
+}
 $('pair-form').addEventListener('submit',event=>{
   event.preventDefault();
+  const phone=normalizedPhone();
+  if(!/^\+[1-9][0-9]{7,14}$/.test(phone)){
+    note('Enter your WhatsApp number with its country code, such as +234.',true);
+    $('phone').focus();
+    return;
+  }
+  if(customize){void requestPair(event.submitter,readSetup());return;}
+  note('');
+  const existing=addingBot?null:current?.deployments.find(bot=>bot.id===selectedBotId);
+  readSetup=buildSettings($('setup-settings'),'setup',existing?.settings.values||current.settingsDefaults);
+  $('setup-number').textContent=phone;
+  $('skip-settings').textContent=existing?'Use current settings':'Use defaults';
+  customize=true;
+  $('number-step').hidden=true;
+  $('customize-step').hidden=false;
+  $('setup-mode').focus();
+});
+$('back-number').addEventListener('click',()=>{resetSetup();$('phone').focus();});
+$('skip-settings').addEventListener('click',()=>void requestPair($('skip-settings')));
+$('edit-settings-form').addEventListener('input',()=>{editingDirty=true;});
+$('edit-settings-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  const deploymentId=editorBot,settings=readEdit();
   action(event.submitter,async()=>{
-    const phone=$('phone').value.trim().replace(/[ ()-]/g,'');
-    const add=addingBot||!selectedBotId;
-    await request('/api/pair',add?{phone,add:true}:{phone,deploymentId:selectedBotId});
-    const view=await request('/api/me');
-    selectedBotId=view.deployments.find(bot=>bot.phone===phone)?.id;
-    addingBot=false;
-    $('phone').value='';
-    draw(view);
+    await request('/api/bot-settings',{deploymentId,settings});
+    if(editorBot===deploymentId){editingDirty=false;editorSnapshot=undefined;}
+    draw(await request('/api/me'));
+    note('Bot settings saved.');
+  });
+});
+let groupList=[];
+function clearGroups(){
+  groupList=[];
+  $('group-form').hidden=true;
+  $('groups-status').textContent='';
+  $('load-groups').closest('details').open=false;
+}
+async function groupRequest(id,values){
+  const {token}=await request('/api/group-settings',{deploymentId:id,...values});
+  const query=new URLSearchParams({bot:id,token});
+  for(let attempt=0;attempt<15&&editorBot===id;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,1250));
+    const result=await request('/api/group-settings?'+query);
+    if(result.error)throw Error(result.error);
+    if(!result.pending)return result;
+  }
+  if(editorBot===id)throw Error('The bot did not respond in time. Try again.');
+  return null;
+}
+function selectGroup(){
+  const group=groupList.find(item=>item.id===$('group-select').value);
+  if(!group)return;
+  $('group-welcome').checked=group.welcome;
+  $('group-goodbye').checked=group.goodbye;
+  $('group-rules').value=group.rules;
+}
+$('group-select').addEventListener('change',selectGroup);
+$('load-groups').addEventListener('click',event=>action(event.currentTarget,async()=>{
+  const id=editorBot;
+  $('groups-status').textContent='Loading groups…';
+  $('group-form').hidden=true;
+  try{
+    const result=await groupRequest(id,{action:'list'});
+    if(!result||editorBot!==id)return;
+    groupList=result.groups;
+    const select=$('group-select');
+    select.replaceChildren();
+    for(const group of groupList){
+      const option=element('option',group.name);
+      option.value=group.id;
+      select.append(option);
+    }
+    $('group-form').hidden=!groupList.length;
+    $('groups-status').textContent=groupList.length?'':'No groups with admin access were found.';
+    selectGroup();
+  }catch(error){if(editorBot===id)$('groups-status').textContent=error.message;}
+}));
+$('group-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  const id=editorBot,group=$('group-select').value;
+  const values={welcome:$('group-welcome').checked,goodbye:$('group-goodbye').checked,rules:$('group-rules').value};
+  action(event.submitter,async()=>{
+    $('groups-status').textContent='Applying group settings…';
+    try{
+      const result=await groupRequest(id,{action:'save',group,values});
+      if(!result||editorBot!==id)return;
+      const item=groupList.find(row=>row.id===group);
+      if(item)Object.assign(item,values);
+      $('groups-status').textContent='Group settings applied.';
+    }catch(error){if(editorBot===id)$('groups-status').textContent=error.message;}
   });
 });
 for(const command of ['pause','resume','cancel']){

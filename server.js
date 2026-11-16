@@ -11,7 +11,7 @@ const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
 
 const random=()=>randomBytes(32).toString('base64url');
-const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']]]);
+const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
 const equal=(left,right)=>typeof left==='string'&&typeof right==='string'&&Buffer.byteLength(left)===Buffer.byteLength(right)&&timingSafeEqual(Buffer.from(left),Buffer.from(right));
 const cookieValue=(req,name)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith(name+'='))?.slice(name.length+1);
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));};
@@ -67,12 +67,12 @@ async function digest(password,salt=randomBytes(16).toString('hex')){
   const key=await derive(password,Buffer.from(salt,'hex'),64,kdf);
   return salt+':'+key.toString('hex');
 }
-async function body(req){
+async function body(req,limit=32768){
   if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))throw new PortalError(415,'Expected JSON.');
   const parts=[];let size=0;
   for await(const part of req){
     size+=part.length;
-    if(size>32768)throw new PortalError(413,'Request too large.');
+    if(size>limit)throw new PortalError(413,'Request too large.');
     parts.push(part);
   }
   try{return JSON.parse(Buffer.concat(parts));}catch{throw new PortalError(400,'Invalid JSON.');}
@@ -135,7 +135,7 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       if(method==='GET'&&route==='/health')return json(res,200,{ok:true});
       if(method==='POST'&&route==='/internal/sync'){
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
-        const data=await body(req);
+        const data=await body(req,5*1024*1024);
         if(!Array.isArray(data?.reports)||data.reports.length>store.maxBots)throw new PortalError(400,'Invalid worker reports.');
         return json(res,200,{deployments:store.sync(data.reports)});
       }
@@ -206,8 +206,21 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         const data=await body(req);
         if(data?.deploymentId!==undefined&&typeof data.deploymentId!=='string')throw new PortalError(400,'Select a bot.');
         store.pair(user.id,typeof data?.phone==='string'?data.phone.trim().replace(/[ ()-]/g,''):null,
-          {add:data?.add===true,id:data?.deploymentId});
+          {add:data?.add===true,id:data?.deploymentId,settings:data?.settings});
         return json(res,202,{ok:true});
+      }
+      if(method==='POST'&&route==='/api/bot-settings'){
+        const data=await body(req);
+        store.saveSettings(user.id,data?.deploymentId,data?.settings);
+        return json(res,200,{ok:true});
+      }
+      if(route==='/api/group-settings'&&method==='POST'){
+        const data=await body(req);
+        const token=store.groupSettings(user.id,data?.deploymentId,data);
+        return json(res,202,{token});
+      }
+      if(route==='/api/group-settings'&&method==='GET'){
+        return json(res,200,store.groupResult(user.id,url.searchParams.get('bot'),url.searchParams.get('token')));
       }
       if(method==='POST'&&route==='/api/control'){
         const data=await body(req);

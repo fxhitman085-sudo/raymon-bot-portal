@@ -359,3 +359,26 @@ test('worker opens isolated auth and gates a bot until paid, then stops it on ba
   assert.equal(stopped,1);
   assert.equal(await bot.onMessages(),undefined);
 });
+
+test('bot settings are scoped to one deployment and acknowledged only by the matching revision',t=>{
+  const {store,member,owner}=fixture(t);
+  store.pair(member,phone,{settings:{mode:'public',statusReact:true,statusEmoji:'👩🏽‍💻'}});
+  const first=store.sync([])[0];
+  assert.deepEqual(first.settings.patch,{mode:'public',statusReact:true,statusEmoji:'👩🏽‍💻'});
+  assert.throws(()=>store.saveSettings(owner,first.id,{mode:'private'}),{status:404});
+  assert.throws(()=>store.saveSettings(member,first.id,{authDir:'/tmp/other'}),{status:400});
+  store.saveSettings(member,first.id,{prefix:'!'});
+  const second=store.sync([report(first,'connecting',{settings:{
+    appliedRevision:first.settings.revision,values:{mode:'public'}
+  }})])[0];
+  assert.equal(second.settings.patch.prefix,'!');
+  const values={mode:'public',prefix:'!',statusReact:true,statusEmoji:'👩🏽‍💻'};
+  store.sync([report(second,'connecting',{settings:{appliedRevision:second.settings.revision,values}})]);
+  let view=store.dashboard(store.user(member)).deployment.settings;
+  assert.equal(view.pending,false);
+  assert.equal(view.values.prefix,'!');
+  store.sync([report(second,'connecting',{settings:{appliedRevision:second.settings.revision,values:{...values,prefix:'?'}}})]);
+  view=store.dashboard(store.user(member)).deployment.settings;
+  assert.equal(view.values.prefix,'?');
+  assert.equal(store.dashboard(store.user(owner)).deployments.length,0);
+});
