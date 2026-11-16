@@ -253,4 +253,4 @@ if(require.main===module){
   process.once('SIGTERM',()=>void stop());
   process.once('SIGINT',()=>void stop());
 }
-module.exports={Worker,samePhone,startWorker};
+module.exports={Worker,samePhone,startWorker,createRuntimeBot};

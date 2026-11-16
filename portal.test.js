@@ -382,3 +382,25 @@ test('bot settings are scoped to one deployment and acknowledged only by the mat
   assert.equal(view.values.prefix,'?');
   assert.equal(store.dashboard(store.user(owner)).deployments.length,0);
 });
+
+test('bundled runtime loads, applies settings and preserves them when reopened',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'raymon-runtime-test-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const {createRuntimeBot}=require('./worker');
+  const {apply,read}=require('./bot-settings');
+  const args={dir:root,authDir:path.join(root,'auth'),phone,id:randomUUID()};
+  const first=await createRuntimeBot(args);
+  try{
+    apply(first.bot,{revision:randomUUID(),patch:{prefix:'!',statusReact:true,statusEmoji:'❤️‍🩹',awayMessage:'Back soon',updateAlerts:false}});
+    assert.equal(first.bot.config.prefix,'!');
+    assert.equal(read(first.bot).updateAlerts,false);
+  }finally{await first.close();}
+  const second=await createRuntimeBot(args);
+  try{
+    const saved=read(second.bot);
+    assert.equal(saved.prefix,'!');
+    assert.equal(saved.statusEmoji,'❤️‍🩹');
+    assert.equal(saved.awayMessage,'Back soon');
+    assert.equal(saved.updateAlerts,false);
+  }finally{await second.close();}
+});
