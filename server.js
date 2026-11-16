@@ -41,11 +41,11 @@ function startRenewalNotices(store,sendMail,origin){
   async function deliver(){
     for(const notice of store.pendingRenewalNotices()){
       if(stopping)break;
-      const {id,paid_until:paidUntil,email}=notice;
+      const {id,phone,paid_until:paidUntil,email}=notice;
       try{
         await sendMail({to:email,subject:'RAYMON BOT needs coins before renewal',id:'renewal/'+id+'/'+paidUntil,
-          text:'Your bot needs 10 coins to renew. Its current time ends at '+new Date(paidUntil).toUTCString()+
-            '. It will pause if your balance is below 10 coins at renewal. View your balance and local renewal time at '+origin+'/'});
+          text:'Your bot for '+phone+' needs 10 coins to renew. Its current time ends at '+new Date(paidUntil).toUTCString()+
+            '. Each bot renews from your shared balance. View your balance and local renewal times at '+origin+'/'});
         store.markRenewalNotice(id,paidUntil);
       }catch{console.error('Could not send a low-balance email. Will retry.');}
     }
@@ -204,12 +204,15 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       }
       if(method==='POST'&&route==='/api/pair'){
         const data=await body(req);
-        store.pair(user.id,typeof data?.phone==='string'?data.phone.trim().replace(/[ ()-]/g,''):null);
+        if(data?.deploymentId!==undefined&&typeof data.deploymentId!=='string')throw new PortalError(400,'Select a bot.');
+        store.pair(user.id,typeof data?.phone==='string'?data.phone.trim().replace(/[ ()-]/g,''):null,
+          {add:data?.add===true,id:data?.deploymentId});
         return json(res,202,{ok:true});
       }
       if(method==='POST'&&route==='/api/control'){
         const data=await body(req);
-        store.control(user.id,data?.action);
+        if(data?.deploymentId!==undefined&&typeof data.deploymentId!=='string')throw new PortalError(400,'Select a bot.');
+        store.control(user.id,data?.action,data?.deploymentId);
         return json(res,200,{ok:true});
       }
       if(method==='POST'&&route==='/api/transfers'){

@@ -61,6 +61,29 @@ class Store {
         deployment_id TEXT PRIMARY KEY REFERENCES deployments(id), paid_until INTEGER NOT NULL
       );
     `);
+    const columns=this.all('PRAGMA table_info(deployments)');
+    if(!columns.some(column=>column.name==='verified_phone')){
+      this.db.exec('PRAGMA foreign_keys=OFF');
+      try{
+        this.tx(()=>this.db.exec(`
+          CREATE TABLE deployments_next (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), phone TEXT NOT NULL,
+            generation TEXT NOT NULL, intent TEXT NOT NULL, state TEXT NOT NULL, linked INTEGER NOT NULL DEFAULT 0,
+            paid_until INTEGER NOT NULL DEFAULT 0, pair_until INTEGER NOT NULL DEFAULT 0,
+            requested INTEGER NOT NULL DEFAULT 0, last_seen INTEGER NOT NULL DEFAULT 0, verified_phone TEXT
+          );
+          INSERT INTO deployments_next SELECT d.*,v.phone FROM deployments d
+            LEFT JOIN verified_numbers v ON v.user_id=d.user_id;
+          DROP TABLE deployments;
+          ALTER TABLE deployments_next RENAME TO deployments;
+          CREATE INDEX deployments_user ON deployments(user_id,requested,id);
+          CREATE TABLE verified_numbers_next (phone TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id));
+          INSERT INTO verified_numbers_next SELECT phone,user_id FROM verified_numbers;
+          DROP TABLE verified_numbers;
+          ALTER TABLE verified_numbers_next RENAME TO verified_numbers;
+        `));
+      }finally{this.db.exec('PRAGMA foreign_keys=ON');}
+    }
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
   all(sql,...params){return this.db.prepare(sql).all(...params);}
@@ -163,64 +186,81 @@ class Store {
     return row?this.user(row.user_id):null;
   }
   logout(token){if(token)this.run('DELETE FROM sessions WHERE token=?',hash(token));}
-  deployment(userId){return this.get('SELECT * FROM deployments WHERE user_id=?',userId);}
+  deployments(userId){return this.all("SELECT * FROM deployments WHERE user_id=? AND state<>'cancelled' ORDER BY requested,id",userId);}
+  deployment(userId,id){
+    if(id===undefined)return this.deployments(userId)[0];
+    return this.get("SELECT * FROM deployments WHERE id=? AND user_id=? AND state<>'cancelled'",id,userId);
+  }
   requireActive(userId){
     const user=this.user(userId);
     if(!user||user.banned)throw new PortalError(403,'This account is suspended.');
     return user;
   }
-  pair(userId,phone){
+  pair(userId,phone,{add=false,id}={}){
     if(typeof phone!=='string'||!/^\+[1-9][0-9]{7,14}$/.test(phone))
       throw new PortalError(400,'Enter your WhatsApp number with its country code, such as +234…');
     return this.tx(()=>{
       const user=this.requireActive(userId), now=this.clock();
-      const current=this.deployment(userId);
+      const current=add?null:this.deployment(userId,id);
+      if(id!==undefined&&!current)throw new PortalError(404,'Bot not found.');
       if(current?.linked)throw new PortalError(409,'Your WhatsApp is already linked. Use Resume bot.');
-      if(current?.intent==='pair'&&current.pair_until>now)return;
+      if(current?.intent==='pair'&&current.pair_until>now&&current.phone===phone)return;
       if(current&&current.requested+45_000>now)throw new PortalError(429,'Wait 45 seconds between pairing attempts.');
       if(user.coins<PRICE&&!(current?.paid_until>now))throw new PortalError(409,'You need at least 10 coins to start.');
-      if(this.get('SELECT 1 FROM verified_numbers WHERE phone=? AND user_id<>?',phone,userId)||
-        this.get("SELECT 1 FROM deployments WHERE phone=? AND user_id<>? AND intent='pair' AND pair_until>?",phone,userId,now))
+      if((phone!==current?.verified_phone&&this.get('SELECT 1 FROM verified_numbers WHERE phone=?',phone))||
+        this.get("SELECT 1 FROM deployments WHERE phone=? AND id<>? AND intent='pair' AND pair_until>?",phone,current?.id||'',now))
         throw new PortalError(409,'This WhatsApp number is registered or already being paired.');
-      this.checkCapacity(userId);
-      const id=current?.id||randomUUID(),generation=randomUUID();
+      this.checkCapacity(current?.id);
+      const botId=current?.id||randomUUID(),generation=randomUUID();
       this.run(`INSERT INTO deployments (id,user_id,phone,generation,intent,state,pair_until,requested)
         VALUES (?,?,?,?,'pair','queued',?,?)
-        ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone,generation=excluded.generation,intent='pair',state='queued',
-        pair_until=excluded.pair_until,requested=excluded.requested,last_seen=0`,id,userId,phone,generation,now+PAIR_WINDOW,now);
-      this.codes.delete(id);
+        ON CONFLICT(id) DO UPDATE SET phone=excluded.phone,generation=excluded.generation,intent='pair',state='queued',
+        pair_until=excluded.pair_until,requested=excluded.requested,last_seen=0`,botId,userId,phone,generation,now+PAIR_WINDOW,now);
+      this.codes.delete(botId);
     });
   }
-  checkCapacity(userId){
+  checkCapacity(id){
+    const now=this.clock();
     const {count}=this.get(`SELECT COUNT(*) AS count FROM deployments d JOIN users u ON u.id=d.user_id
-      WHERE d.user_id<>? AND u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
-      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,userId,this.clock(),this.clock(),PRICE);
+      WHERE d.id<>? AND u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
+      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,id||'',now,now,PRICE);
     if(count>=this.maxBots)throw new PortalError(503,'All bot slots are currently occupied. Try again later.');
   }
-  control(userId,action){
+  cancel(d){
+    if(d.verified_phone)this.run('DELETE FROM verified_numbers WHERE phone=? AND user_id=?',d.verified_phone,d.user_id);
+    this.run("UPDATE deployments SET intent='pause',state='cancelled',linked=0,pair_until=0,verified_phone=NULL WHERE id=?",d.id);
+    this.codes.delete(d.id);
+  }
+  control(userId,action,id){
     return this.tx(()=>{
-      const user=this.requireActive(userId), d=this.deployment(userId),now=this.clock();
-      if(!d)throw new PortalError(404,'Pair your WhatsApp first.');
-      if(action==='pause'){
+      const user=this.requireActive(userId), d=this.deployment(userId,id),now=this.clock();
+      if(!d)throw new PortalError(404,'Bot not found.');
+      if(action==='cancel'){
+        this.cancel(d);
+      }else if(action==='pause'){
         this.run("UPDATE deployments SET intent='pause',state='paused',pair_until=0 WHERE id=?",d.id);
         this.codes.delete(d.id);
       }else if(action==='resume'){
         if(!d.linked)throw new PortalError(409,'You need to pair your WhatsApp again.');
         if(d.paid_until<=now&&user.coins<PRICE)throw new PortalError(409,'You need at least 10 coins to resume.');
-        this.checkCapacity(userId);
+        this.checkCapacity(d.id);
         if(d.intent!=='run')this.run("UPDATE deployments SET intent='run',state='connecting',last_seen=0 WHERE id=?",d.id);
       }else throw new PortalError(400,'Unknown bot action.');
     });
   }
-  admin(actorId,targetId,{action,amount,reason}){
-    if(!['grant','remove','ban','unban','pause'].includes(action)||typeof reason!=='string'||!reason.trim()||reason.length>180)
+  admin(actorId,targetId,{action,amount,reason,deploymentId}){
+    if(!['grant','remove','ban','unban','pause','cancel'].includes(action)||typeof reason!=='string'||!reason.trim()||reason.length>180)
       throw new PortalError(400,'Choose an action and enter a reason of up to 180 characters.');
     reason=reason.trim();
     return this.tx(()=>{
       const actor=this.requireActive(actorId), target=this.user(targetId);
       if(!actor.is_owner)throw new PortalError(403,'Owner access required.');
       if(!target)throw new PortalError(404,'User not found.');
-      if(['grant','remove'].includes(action)){
+      if(action==='cancel'){
+        const d=typeof deploymentId==='string'&&this.deployment(targetId,deploymentId);
+        if(!d)throw new PortalError(404,'Bot not found.');
+        this.cancel(d);
+      }else if(['grant','remove'].includes(action)){
         if(!Number.isSafeInteger(amount)||amount<1||amount>100_000)throw new PortalError(400,'Enter a whole amount between 1 and 100,000.');
         const delta=action==='grant'?amount:-amount;
         if(target.coins+delta<0||target.coins+delta>1_000_000)throw new PortalError(409,'This adjustment would put the balance outside its allowed range.');
@@ -229,8 +269,8 @@ class Store {
         if(target.is_owner&&action==='ban')throw new PortalError(409,'The owner account is protected.');
         if(action==='ban'||action==='unban')this.run('UPDATE users SET banned=? WHERE id=?',Number(action==='ban'),targetId);
         if(action!=='unban'){
-          this.run("UPDATE deployments SET intent='pause',state='paused',pair_until=0 WHERE user_id=?",targetId);
-          const d=this.deployment(targetId);if(d)this.codes.delete(d.id);
+          this.run("UPDATE deployments SET intent='pause',state='paused',pair_until=0 WHERE user_id=? AND state<>'cancelled'",targetId);
+          for(const d of this.deployments(targetId))this.codes.delete(d.id);
         }
       }
       this.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actorId,targetId,action,reason,this.clock());
@@ -244,45 +284,51 @@ class Store {
     return d.state;
   }
   lowBalance(d,user,now=this.clock()){
-    return !user.banned&&d.intent==='run'&&d.linked&&user.coins<PRICE&&
-      d.paid_until>now&&d.paid_until<=now+LOW_BALANCE_WINDOW;
+    if(user.banned||d.intent!=='run'||!d.linked||d.paid_until<=now||d.paid_until>now+LOW_BALANCE_WINDOW)return false;
+    const {n}=this.get(`SELECT count(*) AS n FROM deployments WHERE user_id=? AND intent='run' AND linked=1
+      AND (paid_until<? OR (paid_until=? AND id<=?))`,user.id,d.paid_until,d.paid_until,d.id);
+    return user.coins<n*PRICE;
   }
   pendingRenewalNotices(){
     const now=this.clock();
-    return this.all(`SELECT d.id,d.paid_until,p.email FROM deployments d
+    return this.all(`SELECT d.id,d.phone,d.paid_until,p.email,d.user_id FROM deployments d
       JOIN users u ON u.id=d.user_id JOIN passwords p ON p.user_id=u.id
       LEFT JOIN renewal_notices n ON n.deployment_id=d.id AND n.paid_until=d.paid_until
-      WHERE d.intent='run' AND d.linked=1 AND u.banned=0 AND u.coins<?
+      WHERE d.intent='run' AND d.linked=1 AND u.banned=0 AND u.coins < ? * (
+        SELECT count(*) FROM deployments r WHERE r.user_id=d.user_id AND r.intent='run' AND r.linked=1
+        AND (r.paid_until<d.paid_until OR (r.paid_until=d.paid_until AND r.id<=d.id)))
       AND d.paid_until>? AND d.paid_until<=? AND n.deployment_id IS NULL
-      ORDER BY d.paid_until`,PRICE,now,now+LOW_BALANCE_WINDOW);
+      ORDER BY d.paid_until,d.id`,PRICE,now,now+LOW_BALANCE_WINDOW);
   }
   markRenewalNotice(id,paidUntil){
     this.run(`INSERT INTO renewal_notices VALUES (?,?) ON CONFLICT(deployment_id)
       DO UPDATE SET paid_until=excluded.paid_until WHERE excluded.paid_until>renewal_notices.paid_until`,id,paidUntil);
   }
   dashboard(user){
-    const d=this.deployment(user.id),now=this.clock();
-    let deployment=null;
-    if(d){
+    const now=this.clock();
+    const deployments=this.deployments(user.id).map(d=>{
       const code=this.codes.get(d.id);
-      deployment={phone:d.phone,state:this.state(d,user,now),linked:!!d.linked,paidUntil:d.paid_until||null,
+      return {id:d.id,phone:d.phone,state:this.state(d,user,now),linked:!!d.linked,paidUntil:d.paid_until||null,
         nextRenewal:d.intent==='run'&&d.linked&&d.paid_until>now&&!user.banned?d.paid_until:null,
         lowBalanceAlert:this.lowBalance(d,user,now),
         workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
         lastSeen:d.last_seen||null,
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&code.expires>now&&!user.banned?code.value:null};
-    }
-    return {user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment,history:this.history(user.id),price:PRICE};
+    });
+    return {user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
   ownerData(search='',id){
     const q='%'+search.toLowerCase().slice(0,100)+'%';
-    const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned,d.phone,d.intent,d.state,d.paid_until,d.pair_until,d.last_seen
-      FROM users u LEFT JOIN deployments d ON d.user_id=u.id WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? OR d.phone LIKE ?
+    const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned FROM users u
+      WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? OR EXISTS
+      (SELECT 1 FROM deployments d WHERE d.user_id=u.id AND d.state<>'cancelled' AND d.phone LIKE ?)
       ORDER BY u.created DESC LIMIT 100`,q,q,q);
-    for(const user of users)if(user.phone)user.state=this.state(user,user);
-    return {users,history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
+    const bots=this.all("SELECT id,phone,intent,state,paid_until,pair_until,last_seen FROM deployments WHERE user_id=? AND state<>'cancelled' ORDER BY requested,id",id||'');
+    const selected=id?this.user(id):null;
+    const deployments=selected?bots.map(d=>({id:d.id,phone:d.phone,state:this.state(d,selected)})):[];
+    return {users,deployments,history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
   }
   sync(reports){
     const now=this.clock();
@@ -319,13 +365,15 @@ class Store {
       this.run("UPDATE deployments SET state='connecting' WHERE id=?",d.id);
     }else if(r.status==='online'){
       if(d.intent==='pair'){
-        this.run(`INSERT INTO verified_numbers (phone,user_id)
-          SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM verified_numbers WHERE phone=? AND user_id<>?)
-          ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone`,d.phone,d.user_id,d.phone,d.user_id);
-        if(!this.get('SELECT 1 FROM verified_numbers WHERE phone=? AND user_id=?',d.phone,d.user_id)){
+        const existing=this.get('SELECT user_id FROM verified_numbers WHERE phone=?',d.phone);
+        if(existing&&(existing.user_id!==d.user_id||d.verified_phone!==d.phone)){
           this.run("UPDATE deployments SET intent='pause',state='pair_failed',pair_until=0 WHERE id=?",d.id);
+          this.codes.delete(d.id);
           return;
         }
+        if(d.verified_phone&&d.verified_phone!==d.phone)this.run('DELETE FROM verified_numbers WHERE phone=? AND user_id=?',d.verified_phone,d.user_id);
+        this.run('INSERT OR IGNORE INTO verified_numbers (phone,user_id) VALUES (?,?)',d.phone,d.user_id);
+        this.run('UPDATE deployments SET verified_phone=? WHERE id=?',d.phone,d.id);
       }
       this.codes.delete(d.id);
       let paidUntil=d.paid_until;

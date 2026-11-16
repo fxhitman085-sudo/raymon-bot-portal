@@ -117,6 +117,34 @@ test('coin adjustments are owner-only and bans cancel active work',t=>{
   assert.equal(store.user(member).coins,0);
 });
 
+test('five bots share one balance and users and owners can cancel individual deployments',t=>{
+  let now=Date.now();
+  const store=new Store(':memory:',()=>now);
+  t.after(()=>store.db.close());
+  const owner=store.register({email:OWNER_EMAIL,name:'Owner',digest:'test',ownerAuthorized:true}).id;
+  const member=store.register({email:memberEmail,name:'Member',digest:'test'}).id;
+  store.admin(owner,member,{action:'grant',amount:60,reason:'Fund five bots'});
+  for(let i=0;i<5;i++)store.pair(member,'+234801234567'+i,{add:true});
+  const bots=store.deployments(member);
+  assert.equal(bots.length,5);
+  store.sync(bots.map(bot=>report(bot,'online')));
+  assert.equal(store.user(member).coins,20);
+  assert.equal(store.dashboard(store.user(member)).deployments.length,5);
+  assert.throws(()=>store.control(owner,'cancel',bots[0].id),{status:404});
+  assert.throws(()=>store.admin(member,member,{action:'cancel',deploymentId:bots[0].id,reason:'No'}),{status:403});
+  store.control(member,'cancel',bots[0].id);
+  store.admin(owner,member,{action:'cancel',deploymentId:bots[1].id,reason:'Requested'});
+  assert.equal(store.ownerData('',member).deployments.length,3);
+  assert.equal(store.ownerData('',member).audit[0].action,'cancel');
+  assert.equal(store.get('SELECT 1 FROM verified_numbers WHERE phone=?',bots[0].phone),undefined);
+  now+=DAY;
+  const active=store.sync(bots.map(bot=>report(bot,'online')));
+  assert.equal(store.user(member).coins,0);
+  assert.equal(active.length,2);
+  assert.ok(active.every(bot=>bot.id!==bots[0].id&&bot.id!==bots[1].id&&bot.permitUntil>now));
+  assert.equal(store.dashboard(store.user(member)).deployments.filter(bot=>bot.state==='low_balance').length,1);
+});
+
 test('coin transfers are atomic, recorded on both wallets, and safe to retry',t=>{
   const {store,owner,member}=fixture(t);
   const requestId=randomUUID();

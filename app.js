@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 const names={queued:'Requesting code',awaiting_code:'Waiting for pairing',connecting:'Connecting',reconnecting:'Reconnecting',online:'Online',paused:'Paused',
   low_balance:'Out of coins',expired:'Code expired',needs_pairing:'Needs pairing',pair_failed:'Pairing failed',suspended:'Suspended'};
 const formatDate=value=>new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-let current,selectedUser,pendingTransfer,ownerOpen=false,refreshing=false,registering=false,recovering=false;
+let current,selectedUser,selectedBotId,addingBot=false,botListView,pendingTransfer,ownerOpen=false,refreshing=false,registering=false,recovering=false;
 let resetToken=new URLSearchParams(location.hash.slice(1)).get('reset');
 if(resetToken)history.replaceState(null,'',location.pathname+location.search);
 const note=(message,error=false)=>{
@@ -35,7 +35,10 @@ function fillHistory(list,rows){
 }
 function draw(data){
   current=data;
-  const {user,deployment:d}=data;
+  const {user,deployments=[]}=data;
+  const d=addingBot?null:(deployments.find(bot=>bot.id===selectedBotId)||deployments[0]||null);
+  if(!addingBot)selectedBotId=d?.id;
+
   $('landing').hidden=!!user&&!resetToken;
   $('dashboard').hidden=!user||!!resetToken;
   $('sign-out').hidden=!user||!!resetToken;
@@ -46,13 +49,35 @@ function draw(data){
   $('view-owner').hidden=!user.isOwner;
   $('password-setup').hidden=!user.needsPassword||user.banned;
   $('balance').textContent=user.coins;
+  $('add-bot').hidden=user.banned;
+  const listView=JSON.stringify([selectedBotId,addingBot,deployments.map(({id,phone,state,nextRenewal})=>({id,phone,state,nextRenewal}))]);
+  if(listView!==botListView){
+    botListView=listView;
+    const cards=$('bot-list');
+    cards.replaceChildren();
+    for(const bot of deployments){
+      const card=element('button',undefined,'bot-card');
+      card.type='button';
+      card.setAttribute('aria-pressed',String(!addingBot&&bot.id===selectedBotId));
+      card.append(element('strong',bot.phone),element('span',names[bot.state]||bot.state),
+        element('small',bot.nextRenewal?'Renews '+formatDate(bot.nextRenewal):'10 coins per 24 hours'));
+      card.addEventListener('click',()=>{
+        addingBot=false;
+        selectedBotId=bot.id;
+        $('phone').value='';
+        draw(current);
+      });
+      cards.append(card);
+    }
+    if(!deployments.length)cards.append(element('p','No bots deployed yet.','muted'));
+  }
   $('bot-state').textContent=user.banned?'Suspended':(names[d?.state]||'Not linked');
   $('bot-phone').textContent=d?.phone||'No WhatsApp number';
   $('paid-until').textContent=d?.nextRenewal?formatDate(d.nextRenewal):'—';
   $('renewal-detail').textContent=d?.state==='paused'&&d.paidUntil>Date.now()
     ?'Paused · paid through '+formatDate(d.paidUntil):data.price+' coins per 24 hours';
-  const alert=d?.lowBalanceAlert?'Your bot will pause at '+formatDate(d.nextRenewal)+
-    ' unless your balance reaches '+data.price+' coins. You have '+user.coins+'.':'';
+  const low=deployments.filter(bot=>bot.lowBalanceAlert);
+  const alert=low.length?'Low balance for '+low.length+' upcoming bot renewal(s). Each renewal costs '+data.price+' coins.':'';
   if($('low-balance-alert').textContent!==alert)$('low-balance-alert').textContent=alert;
   $('low-balance-alert').hidden=!alert;
   $('transfer-panel').hidden=user.banned;
@@ -64,6 +89,7 @@ function draw(data){
   $('pair-code').textContent=d?.code||'';
   $('expires').textContent=d?.pairingExpires?'Expires at '+formatDate(d.pairingExpires):'';
   $('bot-actions').hidden=!d?.linked||user.banned;
+  $('cancel-bot').hidden=!d||user.banned;
   const running=['online','connecting','reconnecting'].includes(d?.state);
   $('pause').hidden=!running;
   $('resume').hidden=running;
@@ -98,20 +124,42 @@ async function action(button,callback){
   catch(error){note(error.message,true);}
   finally{button.disabled=false;}
 }
+$('add-bot').addEventListener('click',()=>{
+  addingBot=true;
+  $('phone').value='';
+  draw(current);
+  $('phone').focus();
+});
 $('pair-form').addEventListener('submit',event=>{
   event.preventDefault();
-  action(event.submitter,async()=>{await request('/api/pair',{phone:$('phone').value});await refresh();});
+  action(event.submitter,async()=>{
+    const phone=$('phone').value.trim().replace(/[ ()-]/g,'');
+    const add=addingBot||!selectedBotId;
+    await request('/api/pair',add?{phone,add:true}:{phone,deploymentId:selectedBotId});
+    const view=await request('/api/me');
+    selectedBotId=view.deployments.find(bot=>bot.phone===phone)?.id;
+    addingBot=false;
+    $('phone').value='';
+    draw(view);
+  });
 });
-for(const command of ['pause','resume']){
-  $(command).addEventListener('click',()=>action($(command),async()=>{
-    await request('/api/control',{action:command});
-    await refresh();
-  }));
+for(const command of ['pause','resume','cancel']){
+  const button=$(command==='cancel'?'cancel-bot':command);
+  button.addEventListener('click',()=>{
+    const bot=current?.deployments.find(item=>item.id===selectedBotId);
+    if(!bot||command==='cancel'&&!window.confirm('Cancel '+bot.phone+'? This stops the bot and future charges. To use the number again, pair it as a new bot.'))return;
+    action(button,async()=>{
+      await request('/api/control',{action:command,deploymentId:bot.id});
+      draw(await request('/api/me'));
+      if(command==='cancel')note('Bot cancelled.');
+    });
+  });
 }
 $('copy-code').addEventListener('click',()=>action($('copy-code'),async()=>{
-  if(!current?.deployment?.code)return;
+  const code=current?.deployments.find(bot=>bot.id===selectedBotId)?.code;
+  if(addingBot||!code)return;
   if(!navigator.clipboard)throw new Error('Select and copy the code shown on screen.');
-  await navigator.clipboard.writeText(current.deployment.code);
+  await navigator.clipboard.writeText(code);
   note('Pairing code copied.');
 }));
 $('sign-out').addEventListener('click',()=>action($('sign-out'),async()=>{await request('/api/logout',{});location.assign('/');}));
@@ -157,15 +205,33 @@ async function ownerList(){
       $('action').focus();
     }));
     const controls=element('td');controls.append(button);
-    row.append(identity,element('td',user.phone||'—'),element('td',user.coins),
-      element('td',user.banned?'Suspended':(names[user.state]||'Not linked')),controls);
+    row.append(identity,element('td',user.coins),element('td',user.banned?'Suspended':'Active'),controls);
     table.append(row);
   }
   if(!data.users.length){
     const row=element('tr'),cell=element('td','No matching users.','muted');
-    cell.colSpan=5;row.append(cell);table.append(row);
+    cell.colSpan=4;row.append(cell);table.append(row);
   }
   if(selectedUser){
+    const cards=$('selected-bots'),target=selectedUser;
+    cards.replaceChildren();
+    for(const bot of data.deployments){
+      const card=element('div',undefined,'bot-card');
+      const cancel=element('button','Cancel bot','button subtle');
+      cancel.type='button';
+      cancel.addEventListener('click',()=>{
+        if(!window.confirm('Cancel '+bot.phone+' for '+target.name+' and stop future charges?'))return;
+        action(cancel,async()=>{
+          await request('/api/owner',{userId:target.id,deploymentId:bot.id,action:'cancel',reason:'Cancelled from the owner dashboard.'});
+          await ownerList();
+          await refresh();
+          note('Bot cancelled.');
+        });
+      });
+      card.append(element('strong',bot.phone),element('span',names[bot.state]||bot.state),cancel);
+      cards.append(card);
+    }
+    if(!data.deployments.length)cards.append(element('p','No bots deployed.','muted'));
     fillHistory($('selected-history'),data.history);
     fillHistory($('selected-audit'),data.audit);
   }

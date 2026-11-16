@@ -59,7 +59,7 @@
     <section id="dashboard" hidden>
       <div class="desk-head">
         <div><p class="eyebrow">YOUR CONTROL CENTER</p><h1 id="greeting" class="dash-title">Dashboard</h1><p class="muted" id="account-email"></p></div>
-        <div class="tabs" aria-label="Dashboard views"><button id="view-bot" class="button subtle selected" type="button">My bot</button><button id="view-owner" class="button subtle" type="button" hidden>Owner dashboard</button></div>
+        <div class="tabs" aria-label="Dashboard views"><button id="view-bot" class="button subtle selected" type="button">My bots</button><button id="view-owner" class="button subtle" type="button" hidden>Owner dashboard</button></div>
       </div>
       <article id="password-setup" class="panel password-setup" hidden>
         <h2>Set a password for this account</h2>
@@ -73,9 +73,13 @@
       <div id="bot-view">
         <div class="metrics">
           <article class="metric"><p>COIN BALANCE</p><strong id="balance">0</strong><span>coins available</span></article>
-          <article class="metric"><p>BOT STATUS</p><strong id="bot-state" class="medium">Not linked</strong><span id="bot-phone">No WhatsApp number</span></article>
+          <article class="metric"><p>SELECTED BOT</p><strong id="bot-state" class="medium">Not linked</strong><span id="bot-phone">No WhatsApp number</span></article>
           <article class="metric"><p>NEXT RENEWAL</p><strong id="paid-until" class="medium">—</strong><span id="renewal-detail">10 coins per 24 hours</span></article>
         </div>
+        <section class="bot-fleet panel" aria-labelledby="bots-heading">
+          <div class="owner-head"><h2 id="bots-heading">Your bots</h2><button id="add-bot" class="button primary" type="button">Add WhatsApp bot</button></div>
+          <div id="bot-list" class="bot-list"></div>
+        </section>
         <p id="low-balance-alert" class="notice" role="status" hidden></p>
         <div class="panels">
           <article class="panel">
@@ -94,6 +98,7 @@
               <p id="expires" class="small"></p>
             </div>
             <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
+            <button class="button subtle" id="cancel-bot" type="button" hidden>Cancel bot</button>
           </article>
           <article class="panel">
             <p class="eyebrow">WALLET</p><h2>Coin activity</h2>
@@ -118,15 +123,16 @@
       <section id="owner-view" class="panel" hidden>
         <div class="owner-head"><div><p class="eyebrow">OWNER ACCESS</p><h2>Manage accounts</h2><p class="muted">Adjust balances, review activity and manage access.</p></div>
         <form id="search-form"><label for="search">Search users</label><div class="actions"><input id="search" placeholder="Name, email or number" maxlength="100"><button class="button subtle">Search</button></div></form></div>
-        <div class="table-scroll"><table><thead><tr><th>User</th><th>WhatsApp</th><th>Coins</th><th>Bot status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th>User</th><th>Coins</th><th>Account status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
         <div id="admin-detail" class="admin-detail" hidden>
           <h3 id="selected-user"></h3>
           <form id="owner-action" class="owner-form">
-            <div><label for="action">Action</label><select id="action"><option value="grant">Add coins</option><option value="remove">Remove coins</option><option value="pause">Pause bot</option><option value="ban">Ban user</option><option value="unban">Unban user</option></select></div>
+            <div><label for="action">Action</label><select id="action"><option value="grant">Add coins</option><option value="remove">Remove coins</option><option value="pause">Pause all bots</option><option value="ban">Ban user</option><option value="unban">Unban user</option></select></div>
             <div id="amount-field"><label for="amount">Coins</label><input id="amount" type="number" min="1" max="100000" value="10" inputmode="numeric"></div>
             <div><label for="reason">Reason</label><input id="reason" maxlength="180" required placeholder="Reason for this action"></div>
             <button class="button primary">Apply action</button>
           </form>
+          <h3>Deployed bots</h3><div id="selected-bots" class="bot-list"></div>
           <div class="panels audit"><div><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div><h3>Owner actions</h3><ul class="history" id="selected-audit"></ul></div></div>
         </div>
       </section>
