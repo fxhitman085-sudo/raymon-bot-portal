@@ -175,8 +175,6 @@ class Store {
     return this.tx(()=>{
       const user=this.requireActive(userId), now=this.clock();
       const current=this.deployment(userId);
-      const verified=this.get('SELECT phone FROM verified_numbers WHERE user_id=?',userId);
-      if(verified&&verified.phone!==phone)throw new PortalError(409,'This account already has a verified WhatsApp number.');
       if(current?.linked)throw new PortalError(409,'Your WhatsApp is already linked. Use Resume bot.');
       if(current?.intent==='pair'&&current.pair_until>now)return;
       if(current&&current.requested+45_000>now)throw new PortalError(429,'Wait 45 seconds between pairing attempts.');
@@ -321,7 +319,9 @@ class Store {
       this.run("UPDATE deployments SET state='connecting' WHERE id=?",d.id);
     }else if(r.status==='online'){
       if(d.intent==='pair'){
-        this.run('INSERT OR IGNORE INTO verified_numbers VALUES (?,?)',d.phone,d.user_id);
+        this.run(`INSERT INTO verified_numbers (phone,user_id)
+          SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM verified_numbers WHERE phone=? AND user_id<>?)
+          ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone`,d.phone,d.user_id,d.phone,d.user_id);
         if(!this.get('SELECT 1 FROM verified_numbers WHERE phone=? AND user_id=?',d.phone,d.user_id)){
           this.run("UPDATE deployments SET intent='pause',state='pair_failed',pair_until=0 WHERE id=?",d.id);
           return;

@@ -71,6 +71,34 @@ test('expired pairing attempts cannot charge or permanently reserve a number',t=
   assert.equal(store.deployment(member).phone,phone2);
 });
 
+test('an unlinked account can verify a replacement number without losing paid time or balance',t=>{
+  const {store,advance,owner,member}=fixture(t);
+  store.pair(member,phone);
+  const original=store.deployment(member);
+  store.sync([report(original,'online')]);
+  const paid=store.deployment(member).paid_until;
+  assert.throws(()=>store.pair(member,phone2),{status:409});
+  store.sync([report(original,'needs_pairing')]);
+  advance(45_001);
+  store.pair(member,phone2);
+  const attempt=store.deployment(member);
+  assert.throws(()=>store.pair(owner,phone),{status:409});
+  assert.throws(()=>store.pair(owner,phone2),{status:409});
+  store.sync([report(attempt,'pair_failed')]);
+  assert.equal(store.get('SELECT phone FROM verified_numbers WHERE user_id=?',member).phone,phone);
+  advance(45_001);
+  store.pair(member,phone2);
+  const replacement=store.deployment(member);
+  store.sync([report(attempt,'online'),report(replacement,'online')]);
+  assert.equal(store.get('SELECT phone FROM verified_numbers WHERE user_id=?',member).phone,phone2);
+  assert.equal(store.deployment(member).paid_until,paid);
+  assert.equal(store.deployment(member).linked,1);
+  assert.equal(store.user(member).coins,0);
+  assert.equal(store.history(member).filter(x=>x.kind==='uptime').length,1);
+  assert.throws(()=>store.pair(owner,phone2),{status:409});
+  store.pair(owner,phone);
+});
+
 test('coin adjustments are owner-only and bans cancel active work',t=>{
   const {store,owner,member}=fixture(t);
   assert.throws(()=>store.admin(member,member,{action:'grant',amount:10,reason:'unauthorized'}),{status:403});
