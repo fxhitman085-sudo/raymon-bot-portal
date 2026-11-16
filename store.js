@@ -1,3 +1,4 @@
+const {DEFAULTS,validate,groupId,groupOptions}=require('./bot-settings');
 const {DatabaseSync}=require('node:sqlite');
 const {randomUUID,createHash}=require('node:crypto');
 
@@ -16,6 +17,7 @@ class Store {
     this.maxBots=maxBots;
     this.db=new DatabaseSync(file);
     this.codes=new Map();
+    this.groupRequests=new Map();
     this.workerSeen=null;
     this.db.exec(`
       PRAGMA foreign_keys=ON;
@@ -84,6 +86,10 @@ class Store {
         `));
       }finally{this.db.exec('PRAGMA foreign_keys=ON');}
     }
+    this.db.exec(`CREATE TABLE IF NOT EXISTS bot_settings (
+      deployment_id TEXT PRIMARY KEY REFERENCES deployments(id), revision TEXT,
+      patch TEXT NOT NULL DEFAULT '{}', applied TEXT
+    )`);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
   all(sql,...params){return this.db.prepare(sql).all(...params);}
@@ -196,7 +202,7 @@ class Store {
     if(!user||user.banned)throw new PortalError(403,'This account is suspended.');
     return user;
   }
-  pair(userId,phone,{add=false,id}={}){
+  pair(userId,phone,{add=false,id,settings}={}){
     if(typeof phone!=='string'||!/^\+[1-9][0-9]{7,14}$/.test(phone))
       throw new PortalError(400,'Enter your WhatsApp number with its country code, such as +234…');
     return this.tx(()=>{
@@ -216,8 +222,67 @@ class Store {
         VALUES (?,?,?,?,'pair','queued',?,?)
         ON CONFLICT(id) DO UPDATE SET phone=excluded.phone,generation=excluded.generation,intent='pair',state='queued',
         pair_until=excluded.pair_until,requested=excluded.requested,last_seen=0`,botId,userId,phone,generation,now+PAIR_WINDOW,now);
+      if(settings!==undefined)this.queueSettings(botId,settings);
       this.codes.delete(botId);
     });
+  }
+  queueSettings(id,input){
+    let changes;
+    try{changes=validate(input);}catch(error){throw new PortalError(400,error.message);}
+    if(!Object.keys(changes).length)return;
+    const prior=this.get('SELECT patch FROM bot_settings WHERE deployment_id=?',id);
+    const patch={...JSON.parse(prior?.patch||'{}'),...changes};
+    this.run(`INSERT INTO bot_settings (deployment_id,revision,patch) VALUES (?,?,?)
+      ON CONFLICT(deployment_id) DO UPDATE SET revision=excluded.revision,patch=excluded.patch`,
+      id,randomUUID(),JSON.stringify(patch));
+  }
+  saveSettings(userId,id,input){
+    this.tx(()=>{
+      this.requireActive(userId);
+      const bot=typeof id==='string'&&this.deployment(userId,id);
+      if(!bot)throw new PortalError(404,'Bot not found.');
+      this.queueSettings(bot.id,input);
+    });
+  }
+  settingsView(id){
+    const row=this.get('SELECT * FROM bot_settings WHERE deployment_id=?',id);
+    return {values:{...DEFAULTS,...JSON.parse(row?.applied||'{}'),...JSON.parse(row?.patch||'{}')},
+      synced:!!row?.applied,pending:!!row?.revision};
+  }
+  reportSettings(id,report){
+    if(!report?.values||typeof report.appliedRevision!=='string'&&report.appliedRevision!==null)return;
+    const row=this.get('SELECT revision,applied FROM bot_settings WHERE deployment_id=?',id);
+    if(row?.revision&&row.revision!==report.appliedRevision)return;
+    let snapshot;
+    try{snapshot=JSON.stringify(validate(report.values,{snapshot:true}));}catch{return;}
+    if(row?.applied===snapshot&&!row.revision)return;
+    this.run(`INSERT INTO bot_settings (deployment_id,applied) VALUES (?,?)
+      ON CONFLICT(deployment_id) DO UPDATE SET applied=excluded.applied,revision=NULL,patch='{}'`,id,snapshot);
+  }
+  groupSettings(userId,id,request){
+    this.requireActive(userId);
+    const bot=typeof id==='string'&&this.deployment(userId,id);
+    if(!bot||!bot.linked)throw new PortalError(404,'Linked bot not found.');
+    if(bot.intent!=='run'||bot.last_seen+15_000<=this.clock())throw new PortalError(409,'Bring this bot online to manage groups.');
+    const prior=this.groupRequests.get(id);
+    if(prior?.expires>this.clock()&&!prior.result)throw new PortalError(409,'A group request is already in progress.');
+    let task;
+    if(request?.action==='list')task={action:'list'};
+    else if(request?.action==='save'&&groupId(request.group)){
+      try{task={action:'save',group:request.group,values:groupOptions(request.values)};}
+      catch(error){throw new PortalError(400,error.message);}
+    }else throw new PortalError(400,'Select a group settings action.');
+    const token=randomUUID();
+    this.groupRequests.set(id,{...task,token,expires:this.clock()+25_000,generation:bot.generation});
+    return token;
+  }
+  groupResult(userId,id,token){
+    this.requireActive(userId);
+    const bot=typeof id==='string'&&this.deployment(userId,id);
+    if(!bot||!bot.linked)throw new PortalError(404,'Linked bot not found.');
+    const task=this.groupRequests.get(id);
+    if(!task||task.token!==token||task.expires<=this.clock())throw new PortalError(409,'Group request expired. Try again.');
+    return task.result||{pending:true};
   }
   checkCapacity(id){
     const now=this.clock();
@@ -308,7 +373,7 @@ class Store {
     const now=this.clock();
     const deployments=this.deployments(user.id).map(d=>{
       const code=this.codes.get(d.id);
-      return {id:d.id,phone:d.phone,state:this.state(d,user,now),linked:!!d.linked,paidUntil:d.paid_until||null,
+      return {id:d.id,phone:d.phone,state:this.state(d,user,now),linked:!!d.linked,settings:this.settingsView(d.id),paidUntil:d.paid_until||null,
         nextRenewal:d.intent==='run'&&d.linked&&d.paid_until>now&&!user.banned?d.paid_until:null,
         lowBalanceAlert:this.lowBalance(d,user,now),
         workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
@@ -316,7 +381,7 @@ class Store {
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&code.expires>now&&!user.banned?code.value:null};
     });
-    return {user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
+    return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
   ownerData(search='',id){
@@ -335,13 +400,20 @@ class Store {
     for(const [id,code] of this.codes)if(code.expires<=now)this.codes.delete(id);
     const deployments=this.tx(()=>{
       this.run("UPDATE deployments SET intent='pause',state='expired' WHERE intent='pair' AND pair_until<=?",now);
+      for(const [id,task] of this.groupRequests)if(task.expires<=now)this.groupRequests.delete(id);
       for(const report of reports)this.report(report,now);
       const active=this.all(`SELECT d.*,u.coins FROM deployments d JOIN users u ON u.id=d.user_id
         WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>? AND (u.coins>=? OR d.paid_until>?)) OR
         (d.intent='run' AND d.linked=1 AND (d.paid_until>? OR u.coins>=?)))
         ORDER BY (d.state='online') DESC,d.requested LIMIT ?`,now,PRICE,now,now,PRICE,this.maxBots);
-      return active.map(d=>({id:d.id,phone:d.phone,generation:d.generation,intent:d.intent,
-        pairUntil:d.pair_until,permitUntil:d.paid_until>now?Math.min(d.paid_until,now+12_000):0}));
+      return active.map(d=>{
+        const settings=this.get('SELECT revision,patch FROM bot_settings WHERE deployment_id=?',d.id);
+        const groups=this.groupRequests.get(d.id);
+        return {id:d.id,phone:d.phone,generation:d.generation,intent:d.intent,
+          pairUntil:d.pair_until,permitUntil:d.paid_until>now?Math.min(d.paid_until,now+12_000):0,
+          ...(groups&&!groups.result&&groups.generation===d.generation?{groups}:{}),
+          ...(settings?.revision?{settings:{revision:settings.revision,patch:JSON.parse(settings.patch)}}:{})};
+      });
     });
     this.workerSeen=now;
     return deployments;
@@ -352,6 +424,12 @@ class Store {
     if(!d||d.intent==='pause')return;
     const user=this.user(d.user_id);
     if(!user||user.banned)return;
+    this.reportSettings(d.id,r.settings);
+    const groups=this.groupRequests.get(d.id);
+    if(groups&&!groups.result&&groups.generation===d.generation&&r.groups?.token===groups.token){
+      groups.result=r.groups.error?{error:'Group settings could not be loaded or changed. Check this bot’s group admin access.'}:
+        groups.action==='save'?{saved:true}:{groups:r.groups.groups};
+    }
     if(r.status==='code'&&d.intent==='pair'&&/^[A-Z0-9]{8}$/i.test(r.code||'')){
       this.codes.set(d.id,{generation:d.generation,value:r.code,expires:Math.min(d.pair_until,now+PAIRING_REPORT_TTL)});
       this.run("UPDATE deployments SET state='awaiting_code' WHERE id=?",d.id);

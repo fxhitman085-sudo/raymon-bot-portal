@@ -19,7 +19,7 @@
     <p id="notice" class="notice" role="status" hidden></p>
     <section id="landing" class="landing">
       <div class="hero">
-        <p class="eyebrow"><span class="dot"></span> THE WHATSAPP BOT DASHBOARD</p>
+        <img class="hero-art" src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536">
         <h1>Your WhatsApp.<br><em>Your bot.</em></h1>
         <p class="intro">Link your number, start RAYMON BOT and manage your time from one private dashboard.</p>
         <p class="small first">Your first 24 hours are covered by 10 free coins.</p>
@@ -83,13 +83,24 @@
         <p id="low-balance-alert" class="notice" role="status" hidden></p>
         <div class="panels">
           <article class="panel">
+            <img id="link-art" class="link-art" src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536">
             <p class="eyebrow">CONNECTION</p><h2 id="connection-title">Link WhatsApp</h2>
             <p id="connection-info" class="muted">Use a WhatsApp account you control.</p>
             <p id="connection-diagnostics" class="small" hidden></p>
             <form id="pair-form">
-              <label for="phone">WhatsApp number</label>
+              <div id="number-step"><label for="phone">WhatsApp number</label>
               <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="24" placeholder="+234 800 000 0000" required>
-              <button class="button primary" type="submit">Get pairing code <span aria-hidden="true">↗</span></button>
+              <button class="button primary" type="submit">Continue</button></div>
+              <div id="customize-step" hidden>
+                <h3>Customize your bot</h3>
+                <p id="setup-number" class="small"></p>
+                <div id="setup-settings"></div>
+                <div class="actions">
+                  <button class="button primary" type="submit">Get pairing code</button>
+                  <button id="skip-settings" class="button subtle" type="button">Use defaults</button>
+                  <button id="back-number" class="button subtle" type="button">Edit number</button>
+                </div>
+              </div>
             </form>
             <div id="pair-code-area" class="pair-code" hidden>
               <p class="eyebrow">YOUR PRIVATE PAIRING CODE</p>
@@ -98,6 +109,27 @@
               <p id="expires" class="small"></p>
             </div>
             <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
+            <details id="bot-settings-panel" class="settings-panel" hidden>
+              <summary>Settings</summary>
+              <p id="settings-status" class="small" role="status"></p>
+              <form id="edit-settings-form">
+                <div id="edit-settings"></div>
+                <button class="button primary" type="submit">Save settings</button>
+              </form>
+              <details class="settings-section groups-settings">
+                <summary>Groups</summary>
+                <p class="small">Choose a group where this WhatsApp account is an admin.</p>
+                <button id="load-groups" class="button subtle" type="button">Load groups</button>
+                <p id="groups-status" class="small" role="status"></p>
+                <form id="group-form" hidden>
+                  <label for="group-select">Group</label><select id="group-select"></select>
+                  <div class="settings-toggle"><label for="group-welcome">Welcome messages</label><input id="group-welcome" type="checkbox" role="switch"></div>
+                  <div class="settings-toggle"><label for="group-goodbye">Goodbye messages</label><input id="group-goodbye" type="checkbox" role="switch"></div>
+                  <label for="group-rules">Group rules</label><textarea id="group-rules" rows="4" maxlength="1500"></textarea>
+                  <button class="button primary" type="submit">Save group settings</button>
+                </form>
+              </details>
+            </details>
             <button class="button subtle" id="cancel-bot" type="button" hidden>Cancel bot</button>
           </article>
           <article class="panel">

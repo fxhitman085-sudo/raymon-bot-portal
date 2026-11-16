@@ -1,0 +1,23 @@
+name: Portal checks
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build
+      - run: test -s bot-runtime/assets/announcements.jpg
+      - run: node -e "require('./bot-runtime/lib/bot'); require('./worker')"
+      - run: npm test
+      - run: docker build .

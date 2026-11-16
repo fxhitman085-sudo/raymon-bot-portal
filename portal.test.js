@@ -359,3 +359,48 @@ test('worker opens isolated auth and gates a bot until paid, then stops it on ba
   assert.equal(stopped,1);
   assert.equal(await bot.onMessages(),undefined);
 });
+
+test('bot settings are scoped to one deployment and acknowledged only by the matching revision',t=>{
+  const {store,member,owner}=fixture(t);
+  store.pair(member,phone,{settings:{mode:'public',statusReact:true,statusEmoji:'👩🏽‍💻'}});
+  const first=store.sync([])[0];
+  assert.deepEqual(first.settings.patch,{mode:'public',statusReact:true,statusEmoji:'👩🏽‍💻'});
+  assert.throws(()=>store.saveSettings(owner,first.id,{mode:'private'}),{status:404});
+  assert.throws(()=>store.saveSettings(member,first.id,{authDir:'/tmp/other'}),{status:400});
+  store.saveSettings(member,first.id,{prefix:'!'});
+  const second=store.sync([report(first,'connecting',{settings:{
+    appliedRevision:first.settings.revision,values:{mode:'public'}
+  }})])[0];
+  assert.equal(second.settings.patch.prefix,'!');
+  const values={mode:'public',prefix:'!',statusReact:true,statusEmoji:'👩🏽‍💻'};
+  store.sync([report(second,'connecting',{settings:{appliedRevision:second.settings.revision,values}})]);
+  let view=store.dashboard(store.user(member)).deployment.settings;
+  assert.equal(view.pending,false);
+  assert.equal(view.values.prefix,'!');
+  store.sync([report(second,'connecting',{settings:{appliedRevision:second.settings.revision,values:{...values,prefix:'?'}}})]);
+  view=store.dashboard(store.user(member)).deployment.settings;
+  assert.equal(view.values.prefix,'?');
+  assert.equal(store.dashboard(store.user(owner)).deployments.length,0);
+});
+
+test('bundled runtime loads, applies settings and preserves them when reopened',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'raymon-runtime-test-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const {createRuntimeBot}=require('./worker');
+  const {apply,read}=require('./bot-settings');
+  const args={dir:root,authDir:path.join(root,'auth'),phone,id:randomUUID()};
+  const first=await createRuntimeBot(args);
+  try{
+    apply(first.bot,{revision:randomUUID(),patch:{prefix:'!',statusReact:true,statusEmoji:'❤️‍🩹',awayMessage:'Back soon',updateAlerts:false}});
+    assert.equal(first.bot.config.prefix,'!');
+    assert.equal(read(first.bot).updateAlerts,false);
+  }finally{await first.close();}
+  const second=await createRuntimeBot(args);
+  try{
+    const saved=read(second.bot);
+    assert.equal(saved.prefix,'!');
+    assert.equal(saved.statusEmoji,'❤️‍🩹');
+    assert.equal(saved.awayMessage,'Back soon');
+    assert.equal(saved.updateAlerts,false);
+  }finally{await second.close();}
+});
