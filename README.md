@@ -51,3 +51,18 @@ Use a spare WhatsApp number that is absent from your existing Bot-Hosting.net de
 ## Local checks
 
 Use Node 24. Run `npm ci --ignore-scripts`, `npm run build`, and `npm test`. Set a random `WORKER_TOKEN` and run `npm start` for the website. Set `PORTAL_RUN_WORKER=1` to run both locally. To run the worker separately, set `PORTAL_INTERNAL_URL=http://localhost:3000` and run `npm run worker`. The tests exercise password sign-in and mock WhatsApp; they do not link a real number.
+
+## Keep website-deployed bots on the same release
+
+The **Sync RAYMON BOT** workflow reads `variefx-alt/raymon-whatsapp-bot/main`. It checks for changes approximately every 15 minutes and can also be run on demand from Actions. A `repository_dispatch` event of type `raymon-bot-updated` can trigger it immediately from the source repository. It only publishes a new portal commit after the tests and Docker build pass.
+
+Add two secrets in the portal repository under **Settings → Secrets and variables → Actions**:
+
+| Secret | GitHub account | Repository and permission |
+| --- | --- | --- |
+| `BOT_READ_TOKEN` | `variefx-alt` | `raymon-whatsapp-bot`, Contents read |
+| `PORTAL_SYNC_TOKEN` | The portal GitHub account linked to Railway | `raymon-bot-portal`, Contents read and write |
+
+Use repository-scoped fine-grained tokens. Paste the values into GitHub Actions secrets. Run **Sync RAYMON BOT** once and check the GitHub run and Railway deployment. Source dependency changes require a compatible portal lockfile before the workflow will publish. On success `bot-runtime-version.json` records the exact upstream commit; older bundles are unversioned. Visit the portal’s `/version` endpoint to see which source commit production is running.
+
+Railway should remain connected to portal `main` with autodeploy enabled. The portal worker restarts on each deployment and opens eligible saved sessions from the existing volume with the new bundle, so website users keep their WhatsApp linking and settings.

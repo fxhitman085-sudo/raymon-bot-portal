@@ -21,3 +21,16 @@ jobs:
       - run: node -e "require('./bot-runtime/lib/bot'); require('./worker')"
       - run: npm test
       - run: docker build .
+      - name: Verify runtime packaging with a local source fixture
+        run: |
+          fixture="$(mktemp -d)"
+          cp -a bot-runtime/. "$fixture/"
+          cp package.json "$fixture/package.json"
+          git -C "$fixture" init -q
+          git -C "$fixture" add .
+          git -C "$fixture" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm fixture
+          node scripts/package-bot-runtime.js "$fixture"
+          test "$(node -p "require('./bot-runtime-version.json').commit")" = "$(git -C "$fixture" rev-parse HEAD)"
+          rm -rf bot-runtime
+          npm run build
+          npm test
