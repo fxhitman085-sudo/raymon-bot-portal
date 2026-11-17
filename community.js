@@ -27,9 +27,43 @@ function report(store,d,r,now){
   store.run('INSERT OR IGNORE INTO community_additions VALUES (?,?,?)',result.phone,result.outcome,now);
 }
 
+const releases=require('./public-releases.json');
+const internal=/\b(admin(?:istrat(?:or|ive|ion))?s?|owners?|founders?|staff|privileged)\b/i;
+function publicCaption(release){
+  const lines=release.changes.filter(c=>c.audience==='public'&&typeof c.summary==='string'&&!internal.test(c.summary)).map(c=>c.summary.trim()).filter(Boolean);
+  return lines.length?'⚡ RAYMON BOT Update\n\n'+lines.join('\n'):null;
+}
+async function announce(entry,active){
+  const bot=entry.bot,sock=bot.sock;
+  const valid=()=>active()&&bot.sock===sock;
+  for(const release of releases){
+    const caption=publicCaption(release);
+    if(!caption||!valid())continue;
+    const dir=path.join(this.root,'release-history');
+    await fs.mkdir(dir,{recursive:true,mode:0o700});
+    const marker=path.join(dir,createHash('sha256').update(INVITE+':'+release.id).digest('hex'));
+    try{await fs.access(marker);continue;}catch(e){if(e.code!=='ENOENT')throw e;}
+    const info=await sock.groupGetInviteInfo(INVITE);
+    if(!valid()||!info?.id?.endsWith('@g.us'))return;
+    const group=await sock.groupMetadata(info.id);
+    const ids=group.participants?.map(p=>p.id||p.lid||p.phoneNumber);
+    if(!ids?.length||ids.some(id=>!id)||!valid())return;
+    const image=await fs.readFile(path.join(__dirname,'bot-runtime/assets/announcements.jpg'));
+    if(!valid())return;
+    try{await fs.writeFile(marker,'claimed',{flag:'wx',mode:0o600,flush:true});}
+    catch(e){if(e.code==='EEXIST')continue;throw e;}
+    if(!valid()){await fs.unlink(marker);return;}
+    await sock.sendMessage(group.id,{image,caption,mentions:[...new Set(ids)]});
+  }
+}
+
 class Community {
   constructor({root,clock=Date.now}){this.root=path.join(root,'community-additions');this.clock=clock;this.next=0;this.running=null;}
   run(entry,active){
+    if(entry.task.phone===ADMIN&&active()&&!this.announcing&&this.clock()>=(this.nextAnnouncement||0)){
+      this.nextAnnouncement=this.clock()+60000;
+      this.announcing=announce.call(this,entry,active).catch(()=>console.warn('Community release announcement could not complete.')).finally(()=>{this.announcing=null;});
+    }
     const candidate=entry.task.community;
     if(entry.task.phone!==ADMIN||!phone(candidate?.phone)||candidate.phone===ADMIN||
       entry.communityResult?.phone===candidate.phone||this.running||this.clock()<this.next||!active())return;
