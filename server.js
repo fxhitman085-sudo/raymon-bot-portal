@@ -123,7 +123,15 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
   const query=key=>url.searchParams.get(key);
   const staff=query('staff')==='1', period=query('period')||'daily', previous=Number(query('previous')||0);
   if(method==='GET'){
-    if(route==='staff')json(res,200,v3.staff(id));
+    if(route==='payments'){
+      const review=query('review')==='1';
+      if(query('attachment')){
+        const payment=v3.payment(id,query('attachment'),review);
+        res.writeHead(200,{'Content-Type':'image/jpeg'});
+        res.end(payment.screenshot);
+      }else json(res,200,v3.paymentRows(id,review,query('before')));
+    }
+    else if(route==='staff')json(res,200,v3.staff(id));
     else if(route==='rankings')json(res,200,v3.rankings(id,period,previous));
     else if(route==='referrals')json(res,200,v3.referralAdmin(id,period,previous));
     else if(route==='promos'){
@@ -144,12 +152,23 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
     }else return false;
     return true;
   }
-  if(method!=='POST'||!['staff','permissions','promos','redeem','onboarding','referrals','tickets'].includes(route))return false;
+  if(method!=='POST'||!['staff','permissions','promos','redeem','onboarding','referrals','tickets','payments'].includes(route))return false;
+  if(route==='payments')rateLimit(req,id,'payment-request');
   if(route==='redeem'||route==='tickets'&&!staff)rateLimit(req,id,route==='redeem'?'promo-claim':'support-ticket');
   if(route==='tickets'&&staff)v3.permit(id,'tickets.view');
-  const data=await body(req,route==='tickets'?4*1024*1024+16_384:undefined);
+  const data=await body(req,['tickets','payments'].includes(route)?4*1024*1024+16_384:undefined);
   if(!data||typeof data!=='object'||Array.isArray(data))throw new PortalError(400,'Invalid request.');
   fresh();
+  if(route==='payments'){
+    if(data.action==='review'){
+      return json(res,200,v3.reviewPayment(id,data)),true;
+    }
+    if(data.action!=='submit')throw new PortalError(400,'Choose a payment action.');
+    if(data.screenshot===undefined)throw new PortalError(400,'Upload your payment screenshot.');
+    const screenshot=await ticketScreenshot(data.screenshot);
+    fresh();
+    return json(res,200,v3.submitPayment(id,data,screenshot)),true;
+  }
   if(route==='tickets'){
     if(staff&&data.action==='reply')v3.permit(id,'tickets.reply');
     if(data.action==='reply')v3.ticket(id,typeof data.ticketId==='string'?data.ticketId:'',staff);
@@ -248,7 +267,7 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
       const user=store.session(session);
       if(method==='GET'&&route==='/api/me')return json(res,200,user?store.dashboard(user):{user:null,recoveryAvailable:!!sendMail});
       if(method==='GET'&&route==='/api/community')return json(res,200,{
-        announcements:store.announcements(),community:publicUrl(links.community),support:publicUrl(links.support)});
+        announcements:store.announcements(),community:publicUrl(links.community),support:'https://wa.me/message/264FM6MC5QN3G1'});
       if(method==='POST'&&req.headers.origin!==origin)throw new PortalError(403,'Request origin not allowed.');
       if(method==='POST'&&route==='/api/auth/forgot-password'){
         if(!sendMail)throw new PortalError(503,'Password recovery email is not configured. Contact the portal owner.');

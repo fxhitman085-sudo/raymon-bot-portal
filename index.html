@@ -246,13 +246,32 @@
         </div>
       </section>
       <section id="buy-view" hidden>
-        <article class="panel coming-soon"><div class="auth-emblem"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V5H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7m19 6h-5a2 2 0 1 0 0 4h5"/></svg></div><h1 id="buy-heading" tabindex="-1">Buy Coins</h1><h2>COMING SOON 🚀</h2>
-        <p>We're preparing a secure and convenient way to purchase coins. Stay tuned for future updates.</p>
-        <button class="button primary" id="buy-back" type="button">Back to Dashboard</button></article>
+        <div class="page-heading"><h1 id="buy-heading" tabindex="-1">Buy Coins</h1><p class="muted">Choose your coins, transfer to OPay, then submit your payment receipt for review.</p></div>
+        <div class="payment-layout">
+          <article class="panel">
+            <h2>Pay by bank transfer</h2>
+            <dl class="payment-bank"><div><dt>Bank</dt><dd>OPay</dd></div><div><dt>Account number</dt><dd>8059692394</dd></div></dl>
+            <button class="button subtle" id="copy-payment-account" type="button">Copy account number</button>
+            <form id="payment-form">
+              <fieldset class="payment-packages"><legend>Choose a coin package</legend>
+                <label><input type="radio" name="coin-package" value="50" required checked><span><strong>50 coins</strong><small>₦500</small></span></label>
+                <label><input type="radio" name="coin-package" value="100" required><span><strong>100 coins</strong><small>₦1,000</small></span></label>
+                <label><input type="radio" name="coin-package" value="200" required><span><strong>200 coins</strong><small>₦2,000</small></span></label>
+              </fieldset>
+              <p id="payment-total" class="small">Transfer ₦500 for 50 coins.</p>
+              <label for="payment-reference">Bank transaction reference</label><input id="payment-reference" maxlength="120" minlength="6" autocomplete="off" required>
+              <label for="payment-screenshot">Payment screenshot (JPG, PNG or WebP, up to 3 MB)</label><input id="payment-screenshot" type="file" accept="image/jpeg,image/png,image/webp" required>
+              <p class="small">Your coins will be credited after the payment is confirmed. You can follow its status below.</p>
+              <button class="button primary" type="submit">Submit payment evidence</button>
+            </form>
+          </article>
+          <article class="panel"><div class="dialog-head"><h2>My payments</h2><button class="button subtle" id="refresh-payments" type="button">Refresh</button></div><div id="payment-history" aria-live="polite"></div></article>
+        </div>
+        <button class="button subtle" id="buy-back" type="button">Back to Dashboard</button>
       </section>
       <section id="community-view" hidden>
         <div class="page-heading"><h1 id="community-heading" tabindex="-1">Community</h1></div>
-        <div class="actions community-links"><a class="button primary" id="community-link" target="_blank" rel="noopener noreferrer" hidden>Join the community</a><button id="community-support" class="button subtle" type="button">Support</button></div>
+        <div class="actions community-links"><a class="button primary" id="community-link" target="_blank" rel="noopener noreferrer" hidden>Join the community</a><a href="https://wa.me/message/264FM6MC5QN3G1" target="_blank" rel="noopener noreferrer" id="community-support" class="button subtle">Support</a></div>
         <article class="panel"><h2>Official announcements</h2><div id="community-feed" class="event-list"></div></article>
       </section>
       <section id="profile-view" hidden>
@@ -354,13 +373,14 @@
           <details id="staff-inbox-panel" class="panel" hidden><summary>Support inbox</summary><div id="staff-inbox"></div></details>
           <details id="staff-promos-panel" class="panel" hidden><summary>Promotional Coin Codes</summary><div id="staff-promos"></div></details>
           <details id="staff-referrals-panel" class="panel" hidden><summary>Referral Leaderboard Prizes</summary><div id="staff-referrals"></div></details>
+          <details id="founder-payments-panel" class="panel" hidden><summary>Coin Payments</summary><div id="founder-payments"></div></details>
           <details id="founder-staff-panel" class="panel" hidden><summary>Administrators and Permissions</summary><div id="founder-staff"></div></details>
           <details id="founder-audit-panel" class="panel" hidden><summary>Admin Activity Log</summary><div id="founder-audit"></div></details>
         </div>
       </section>
       </div>
     </section>
-    <button id="support-button" class="support-button icon-button" type="button" aria-label="Support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg></button>
+    <a href="https://wa.me/message/264FM6MC5QN3G1" target="_blank" rel="noopener noreferrer" id="support-button" class="support-button icon-button" aria-label="Support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg></a>
     <dialog id="guide-dialog" class="portal-dialog" aria-labelledby="guide-heading">
       <div class="dialog-head"><h2 id="guide-heading">Setup guide</h2><form method="dialog"><button class="icon-button" type="submit" aria-label="Close setup guide">×</button></form></div>
       <p id="guide-progress" class="small"></p><h3 id="guide-title"></h3><p id="guide-copy" class="muted"></p>
