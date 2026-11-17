@@ -901,3 +901,75 @@ test('payment migration persists pending evidence and approval safely across res
   store.v3.reviewPayment(owner,{paymentId:requestId,decision:'approved'});
   assert.equal(store.user(member).coins,210);
 });
+
+test('Founder package editing preserves old payment prices, supports new packages, and blocks stale submissions',t=>{
+  const {store,owner,member}=fixture(t),v3=store.v3;
+  const original=v3.packages(member).find(row=>row.id==='50');
+  const payment={requestId:randomUUID(),packageId:original.id,packageRevision:original.revision,reference:'ORIGINAL-PRICE'};
+  const receipt=Buffer.from('original-price-receipt');
+  v3.submitPayment(member,payment,receipt);
+  assert.throws(()=>v3.savePackage(member,{packageId:'50',expectedRevision:original.revision,naira:700,coins:60,active:true}),{status:403});
+  const updated=v3.savePackage(owner,{packageId:'50',expectedRevision:original.revision,naira:700,coins:60,active:true});
+  assert.notEqual(updated.revision,original.revision);
+  assert.deepEqual(v3.submitPayment(member,payment,receipt),{id:payment.requestId,status:'pending'});
+  v3.reviewPayment(owner,{paymentId:payment.requestId,decision:'approved'});
+  assert.equal(store.user(member).coins,60);
+  assert.equal(v3.paymentRows(member,false).items[0].naira,500);
+  assert.equal(v3.paymentRows(member,false).items[0].coins,50);
+  assert.throws(()=>v3.submitPayment(member,{...payment,requestId:randomUUID(),reference:'STALE-PRICE'},Buffer.from('stale screenshot')),{status:409});
+  const created={packageId:randomUUID(),expectedRevision:null,coins:350,naira:3200,active:true};
+  const first=v3.savePackage(owner,created);
+  assert.deepEqual(v3.savePackage(owner,created),first);
+  const row=v3.packages(member).find(item=>item.id===created.packageId);
+  v3.submitPayment(member,{requestId:randomUUID(),packageId:row.id,packageRevision:row.revision,reference:'NEW-PACKAGE-PRICE'},Buffer.from('new package screenshot'));
+  assert.equal(v3.paymentRows(member,false).items[0].coins,350);
+  assert.equal(v3.paymentRows(member,false).items[0].naira,3200);
+  v3.savePackage(owner,{...created,expectedRevision:row.revision,active:false});
+  assert.equal(v3.packages(member).some(item=>item.id===row.id),false);
+  assert.equal(v3.packages(owner,true).find(item=>item.id===row.id).active,false);
+  assert.throws(()=>v3.submitPayment(member,{requestId:randomUUID(),packageId:row.id,reference:'INACTIVE-PACKAGE'},Buffer.from('inactive screenshot')),{status:409});
+  assert.throws(()=>v3.savePackage(owner,{...created,expectedRevision:row.revision,coins:500}),{status:409});
+  assert.throws(()=>v3.savePackage(owner,{...created,packageId:randomUUID(),coins:0}),{status:400});
+  assert.throws(()=>v3.savePackage(owner,{...created,packageId:randomUUID(),naira:1.5}),{status:400});
+  assert.ok(v3.staff(owner).audit.some(item=>item.action==='package.created'));
+});
+
+test('package management API requires Founder access and exposes current packages to signed-in users',async t=>{
+  const {store,owner,member}=fixture(t);
+  store.putSession(owner,'package-founder');
+  store.putSession(member,'package-member');
+  store.v3.setStaff(owner,{userId:member,action:'level',level:7});
+  store.v3.setPermissions(owner,{level:7,permissions:['coins.adjust','coins.view']});
+  const origin='http://localhost:3000',server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const request=(suffix,session,data)=>fetch('http://127.0.0.1:'+server.address().port+'/api/v3/packages'+suffix,{
+    method:data?'POST':'GET',headers:{origin,'Content-Type':'application/json',...(session?{cookie:'raymon='+session}:{})},
+    body:data?JSON.stringify(data):undefined
+  });
+  assert.equal((await request('',null)).status,401);
+  assert.equal((await request('?manage=1','package-member')).status,403);
+  const input={packageId:randomUUID(),expectedRevision:null,coins:500,naira:4500,active:true};
+  assert.equal((await request('','package-member',input)).status,403);
+  assert.equal((await request('','package-founder',input)).status,200);
+  const result=await (await request('','package-member')).json();
+  assert.equal(result.packages.find(row=>row.id===input.packageId).naira,4500);
+});
+
+test('custom package prices and activation survive restart without reseeding the defaults',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'portal-packages-')),file=path.join(dir,'portal.sqlite');
+  let store=new Store(file);
+  t.after(async()=>{store.db.close();await fs.rm(dir,{recursive:true,force:true});});
+  const owner=seedFounder(store),initial=store.v3.packages(owner,true).find(item=>item.id==='50');
+  store.v3.savePackage(owner,{packageId:'50',expectedRevision:initial.revision,naira:600,coins:55,active:false});
+  const custom={packageId:randomUUID(),expectedRevision:null,naira:2700,coins:300,active:true};
+  store.v3.savePackage(owner,custom);
+  store.db.close();
+  store=new Store(file);
+  const restored=store.v3.packages(owner,true).find(row=>row.id==='50');
+  assert.equal(restored.active,false);
+  assert.equal(restored.naira,600);
+  assert.equal(restored.coins,55);
+  assert.equal(store.v3.packages(owner).find(row=>row.id===custom.packageId).coins,300);
+  assert.equal(store.v3.packages(owner,true).length,4);
+});

@@ -22,7 +22,7 @@ const ADMIN_ACTIONS={grant:'coins.adjust',remove:'coins.adjust',ban:'users.moder
   pause:'deployments.manage',cancel:'deployments.manage'};
 const PERIODS=['daily','weekly','monthly','all'];
 const DAY=86_400_000, OFFSET=3_600_000;
-const COIN_PACKAGES=[
+const DEFAULT_COIN_PACKAGES=[
   {id:'50',naira:500,coins:50},
   {id:'100',naira:1000,coins:100},
   {id:'200',naira:2000,coins:200}
@@ -50,6 +50,11 @@ class PortalV3 {
     this.s=store;
     this.Error=ErrorType;
     store.tx(()=>store.db.exec(`
+      CREATE TABLE IF NOT EXISTS v3_coin_packages (
+        id TEXT PRIMARY KEY, naira INTEGER NOT NULL CHECK(naira>0 AND naira<=100000000),
+        coins INTEGER NOT NULL CHECK(coins>0 AND coins<=1000000),
+        active INTEGER NOT NULL CHECK(active IN (0,1)), revision TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS v3_payments (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
         package_id TEXT NOT NULL, naira INTEGER NOT NULL, coins INTEGER NOT NULL,
@@ -115,6 +120,13 @@ class PortalV3 {
         awarded INTEGER NOT NULL, winners TEXT NOT NULL, PRIMARY KEY(period,starts)
       );
     `));
+    store.tx(()=>{
+      if(store.get("SELECT 1 FROM v3_migrations WHERE name='coin-packages'"))return;
+      for(const item of DEFAULT_COIN_PACKAGES){
+        store.run('INSERT OR IGNORE INTO v3_coin_packages VALUES (?,?,?,?,?)',item.id,item.naira,item.coins,1,randomUUID());
+      }
+      store.run("INSERT INTO v3_migrations VALUES ('coin-packages')");
+    });
     // Backfill only from existing paid, verified deployments. Keep a permanent fingerprint so a
     // recycled or released number cannot qualify a second referral.
     store.tx(()=>{
@@ -292,6 +304,36 @@ class PortalV3 {
       return {id:ticket.id};
     });
   }
+  packages(id,manage=false){
+    if(manage)this.permit(id,'founder');
+    else this.s.requireActive(id);
+    return this.s.all('SELECT id,naira,coins,active,revision FROM v3_coin_packages WHERE (? OR active=1) ORDER BY coins,naira,id',Number(manage))
+      .map(row=>({...row,active:!!row.active}));
+  }
+  savePackage(id,{packageId,expectedRevision,naira,coins,active}={}){
+    return this.s.tx(()=>{
+      this.permit(id,'founder');
+      if(typeof packageId!=='string'||!packageId||packageId.length>36||
+        !Number.isSafeInteger(naira)||naira<1||naira>100_000_000||
+        !Number.isSafeInteger(coins)||coins<1||coins>1_000_000||typeof active!=='boolean'||
+        expectedRevision!==null&&typeof expectedRevision!=='string')
+        this.fail(400,'Enter a whole price in naira, a positive coin amount, and the package status.');
+      const existing=this.s.get('SELECT * FROM v3_coin_packages WHERE id=?',packageId);
+      if(existing){
+        if(existing.naira===naira&&existing.coins===coins&&!!existing.active===active)return {id:existing.id,revision:existing.revision};
+        if(expectedRevision!==existing.revision)this.fail(409,'This package changed. Refresh the package list before editing it.');
+      }else if(expectedRevision!==null||!/^[a-f0-9-]{36}$/.test(packageId)){
+        this.fail(409,'Package not found. Refresh the list and try again.');
+      }
+      const revision=randomUUID();
+      this.s.run(`INSERT INTO v3_coin_packages VALUES (?,?,?,?,?) ON CONFLICT(id)
+        DO UPDATE SET naira=excluded.naira,coins=excluded.coins,active=excluded.active,revision=excluded.revision`,
+        packageId,naira,coins,Number(active),revision);
+      this.audit(id,existing?'package.updated':'package.created',packageId,
+        coins+' coins · '+naira+' naira · '+(active?'Active':'Inactive'));
+      return {id:packageId,revision};
+    });
+  }
   paymentRows(id,review,before){
     if(review)this.permit(id,'founder');
     else this.s.requireActive(id);
@@ -301,7 +343,7 @@ class PortalV3 {
       WHERE (? OR p.user_id=?) AND p.rowid<COALESCE((SELECT rowid FROM v3_payments WHERE id=?),9223372036854775807)
       ORDER BY p.rowid DESC LIMIT 51`,Number(review),id,before||'');
     return {
-      bank:'OPay',accountNumber:'8059692394',packages:COIN_PACKAGES,
+      bank:'OPay',accountNumber:'8059692394',packages:this.packages(id),
       items:rows.slice(0,50).map(row=>{
         if(review)return row;
         const {name,email,...payment}=row;
@@ -318,13 +360,12 @@ class PortalV3 {
     if(!payment)this.fail(404,'Payment request not found.');
     return payment;
   }
-  submitPayment(id,{requestId,packageId,reference}={},screenshot){
+  submitPayment(id,{requestId,packageId,packageRevision,reference}={},screenshot){
     return this.s.tx(()=>{
       this.s.requireActive(id);
-      const selected=COIN_PACKAGES.find(row=>row.id===packageId);
       const text=typeof reference==='string'?reference.trim():'';
       const key=text.replace(/[^a-z0-9]/gi,'').toUpperCase();
-      if(typeof requestId!=='string'||!/^[a-f0-9-]{36}$/.test(requestId)||!selected||
+      if(typeof requestId!=='string'||!/^[a-f0-9-]{36}$/.test(requestId)||typeof packageId!=='string'||
         !text||text.length>120||key.length<6||!Buffer.isBuffer(screenshot)||!screenshot.length)
         this.fail(400,'Choose a coin package, enter the bank transaction reference, and upload a payment screenshot.');
       const screenshotHash=createHash('sha256').update(screenshot).digest('hex');
@@ -334,6 +375,11 @@ class PortalV3 {
           this.fail(409,'This request has already been used. Refresh your payment history.');
         return {id:prior.id,status:prior.status};
       }
+      const selected=this.s.get('SELECT id,coins,naira,revision,active FROM v3_coin_packages WHERE id=?',packageId);
+      if(!selected)this.fail(400,'Choose an available coin package.');
+      if(!selected.active)this.fail(409,'This package is unavailable. Refresh the coin packages.');
+      if(packageRevision!==undefined&&packageRevision!==selected.revision)
+        this.fail(409,'This package changed. Refresh the coin packages before sending a payment.');
       if(this.s.get('SELECT 1 FROM v3_payments WHERE reference_key=? OR screenshot_hash=?',key,screenshotHash))
         this.fail(409,'This transaction reference or payment screenshot has already been submitted.');
       if(this.s.get("SELECT count(*) AS n FROM v3_payments WHERE user_id=? AND status='pending'",id).n>=5)
