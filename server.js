@@ -131,6 +131,7 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
         res.end(payment.screenshot);
       }else json(res,200,v3.paymentRows(id,review,query('before')));
     }
+    else if(route==='packages')json(res,200,{packages:v3.packages(id,query('manage')==='1')});
     else if(route==='staff')json(res,200,v3.staff(id));
     else if(route==='rankings')json(res,200,v3.rankings(id,period,previous));
     else if(route==='referrals')json(res,200,v3.referralAdmin(id,period,previous));
@@ -152,7 +153,7 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
     }else return false;
     return true;
   }
-  if(method!=='POST'||!['staff','permissions','promos','redeem','onboarding','referrals','tickets','payments'].includes(route))return false;
+  if(method!=='POST'||!['staff','permissions','promos','redeem','onboarding','referrals','tickets','payments','packages'].includes(route))return false;
   if(route==='payments')rateLimit(req,id,'payment-request');
   if(route==='redeem'||route==='tickets'&&!staff)rateLimit(req,id,route==='redeem'?'promo-claim':'support-ticket');
   if(route==='tickets'&&staff)v3.permit(id,'tickets.view');
@@ -177,7 +178,8 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
     return json(res,200,v3.ticketAction(id,staff,data,screenshot)),true;
   }
   let result;
-  if(route==='staff')v3.setStaff(id,data);
+  if(route==='packages')result=v3.savePackage(id,data);
+  else if(route==='staff')v3.setStaff(id,data);
   else if(route==='permissions')v3.setPermissions(id,data);
   else if(route==='promos')v3.promoSave(id,data);
   else if(route==='redeem')result=v3.redeem(id,data.code);

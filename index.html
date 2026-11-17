@@ -253,16 +253,12 @@
             <dl class="payment-bank"><div><dt>Bank</dt><dd>OPay</dd></div><div><dt>Account number</dt><dd>8059692394</dd></div></dl>
             <button class="button subtle" id="copy-payment-account" type="button">Copy account number</button>
             <form id="payment-form">
-              <fieldset class="payment-packages"><legend>Choose a coin package</legend>
-                <label><input type="radio" name="coin-package" value="50" required checked><span><strong>50 coins</strong><small>₦500</small></span></label>
-                <label><input type="radio" name="coin-package" value="100" required><span><strong>100 coins</strong><small>₦1,000</small></span></label>
-                <label><input type="radio" name="coin-package" value="200" required><span><strong>200 coins</strong><small>₦2,000</small></span></label>
-              </fieldset>
-              <p id="payment-total" class="small">Transfer ₦500 for 50 coins.</p>
+              <fieldset class="payment-packages" id="payment-packages" disabled><legend>Choose a coin package</legend></fieldset>
+              <div class="actions"><p id="payment-total" class="small" aria-live="polite">Loading coin packages…</p><button class="button subtle" id="refresh-packages" type="button">Refresh packages</button></div>
               <label for="payment-reference">Bank transaction reference</label><input id="payment-reference" maxlength="120" minlength="6" autocomplete="off" required>
               <label for="payment-screenshot">Payment screenshot (JPG, PNG or WebP, up to 3 MB)</label><input id="payment-screenshot" type="file" accept="image/jpeg,image/png,image/webp" required>
               <p class="small">Your coins will be credited after the payment is confirmed. You can follow its status below.</p>
-              <button class="button primary" type="submit">Submit payment evidence</button>
+              <button class="button primary" id="submit-payment" type="submit" disabled>Submit payment evidence</button>
             </form>
           </article>
           <article class="panel"><div class="dialog-head"><h2>My payments</h2><button class="button subtle" id="refresh-payments" type="button">Refresh</button></div><div id="payment-history" aria-live="polite"></div></article>
@@ -373,6 +369,7 @@
           <details id="staff-inbox-panel" class="panel" hidden><summary>Support inbox</summary><div id="staff-inbox"></div></details>
           <details id="staff-promos-panel" class="panel" hidden><summary>Promotional Coin Codes</summary><div id="staff-promos"></div></details>
           <details id="staff-referrals-panel" class="panel" hidden><summary>Referral Leaderboard Prizes</summary><div id="staff-referrals"></div></details>
+          <details id="founder-packages-panel" class="panel" hidden><summary>Coin Packages</summary><div id="founder-packages"></div></details>
           <details id="founder-payments-panel" class="panel" hidden><summary>Coin Payments</summary><div id="founder-payments"></div></details>
           <details id="founder-staff-panel" class="panel" hidden><summary>Administrators and Permissions</summary><div id="founder-staff"></div></details>
           <details id="founder-audit-panel" class="panel" hidden><summary>Admin Activity Log</summary><div id="founder-audit"></div></details>

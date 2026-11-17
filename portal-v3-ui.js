@@ -13,14 +13,14 @@ function renderV3Access(user){
   const roleKey=JSON.stringify([user.email,user.staff]);
   if(roleKey!==previousRole){
     selectedUser=null;
-    for(const id of ['staff-inbox','staff-promos','staff-referrals','founder-staff','founder-audit','founder-payments','payment-history','users','selected-bots','selected-history','selected-audit'])
+    for(const id of ['staff-inbox','staff-promos','staff-referrals','founder-staff','founder-audit','founder-payments','founder-packages','payment-history','users','selected-bots','selected-history','selected-audit'])
       $(id).replaceChildren();
-    for(const id of ['staff-inbox-panel','staff-promos-panel','staff-referrals-panel','founder-staff-panel','founder-audit-panel','founder-payments-panel'])
+    for(const id of ['staff-inbox-panel','staff-promos-panel','staff-referrals-panel','founder-staff-panel','founder-audit-panel','founder-payments-panel','founder-packages-panel'])
       $(id).open=false;
     $('admin-detail').hidden=true;
     previousRole=roleKey;
   }
-  $('founder-payments-panel').hidden=!user.isOwner;
+  $('founder-payments-panel').hidden=$('founder-packages-panel').hidden=!user.isOwner;
   $('view-owner').hidden=!canAdmin();
   $('view-owner').lastChild.textContent=user.isOwner?'Founder Dashboard':'Admin Dashboard';
   $('owner-heading').textContent=user.isOwner?'Founder Dashboard':'Adm Lvl '+user.staff?.level+' Dashboard';
@@ -519,7 +519,8 @@ $('guide-jump').addEventListener('click',()=>{
   else switchView(view);
 });
 
-let pendingPayment=null,paymentAccount='';
+let pendingPayment=null,paymentAccount='',availablePackages=[];
+let packageLoad=0,packagesLoading=false;
 const paymentLoads={mine:0,review:0};
 function paymentListRow(payment,review){
   const card=element('article',undefined,'v3-record payment-record');
@@ -589,17 +590,60 @@ for(const id of ['view-buy','wallet-buy'])$(id).addEventListener('click',()=>act
     pendingPayment=null;
     $('payment-form').reset();
     paymentAccount=current?.user?.email||'';
+    availablePackages=[];
     showPaymentTotal();
   }
-  await loadPayments();
+  await Promise.all([loadCoinPackages(),loadPayments()]);
 }));
 $('refresh-payments').addEventListener('click',()=>action($('refresh-payments'),()=>loadPayments()));
 bindPanel('founder-payments-panel',()=>loadPayments(true));
-function showPaymentTotal(){
-  const selected=$('payment-form').querySelector('input[name="coin-package"]:checked').value;
-  setValue('payment-total','Transfer ₦'+numberFormat.format(Number(selected)*10)+' for '+selected+' coins.');
+function selectedCoinPackage(){
+  const selected=$('payment-form').querySelector('input[name="coin-package"]:checked')?.value;
+  return availablePackages.find(item=>item.id===selected);
 }
-for(const field of $('payment-form').querySelectorAll('input'))field.addEventListener('change',()=>{
+function showPaymentTotal(){
+  const selected=selectedCoinPackage();
+  $('submit-payment').disabled=packagesLoading||!selected;
+  if(packagesLoading)return;
+  setValue('payment-total',selected?
+    'Transfer ₦'+numberFormat.format(selected.naira)+' for '+numberFormat.format(selected.coins)+' coins.':
+    'No coin packages are currently available. Contact support.');
+}
+async function loadCoinPackages(){
+  const version=++packageLoad,account=current?.user?.email;
+  const selected=selectedCoinPackage();
+  packagesLoading=true;
+  $('submit-payment').disabled=true;
+  $('payment-packages').disabled=true;
+  setValue('payment-total','Loading coin packages…');
+  try{
+    const {packages}=await request(v3Path('packages'));
+    if(version!==packageLoad||current?.user?.email!==account)return;
+    availablePackages=packages;
+    pendingPayment=null;
+    const fieldset=$('payment-packages');
+    fieldset.replaceChildren(element('legend','Choose a coin package'));
+    const keep=packages.some(item=>item.id===selected?.id)?selected.id:packages[0]?.id;
+    for(const item of packages){
+      const label=element('label'),input=v3Input('radio',{name:'coin-package',value:item.id,required:true,checked:item.id===keep,defaultChecked:item.id===keep});
+      const text=element('span');
+      text.append(element('strong',numberFormat.format(item.coins)+' coins'),element('small','₦'+numberFormat.format(item.naira)));
+      label.append(input,text);fieldset.append(label);
+    }
+    fieldset.disabled=!packages.length;
+    packagesLoading=false;
+    showPaymentTotal();
+  }catch(error){
+    if(version===packageLoad){
+      availablePackages=[];
+      packagesLoading=false;
+      setValue('payment-total','Could not load packages. Press Refresh packages to try again.');
+    }
+    throw error;
+  }
+}
+$('refresh-packages').addEventListener('click',()=>action($('refresh-packages'),loadCoinPackages));
+$('payment-form').addEventListener('change',()=>{
   pendingPayment=null;
   showPaymentTotal();
 });
@@ -612,14 +656,17 @@ $('payment-form').addEventListener('submit',event=>{
   const form=event.currentTarget;
   action(event.submitter,async()=>{
     const account=current?.user?.email;
+    const selected=selectedCoinPackage();
+    if(!selected)throw Error('Choose an available coin package.');
     const screenshot=await screenshotValue($('payment-screenshot'));
     if(!screenshot)throw Error('Upload a payment screenshot.');
     const payload={
-      action:'submit',packageId:form.querySelector('input[name="coin-package"]:checked').value,
+      action:'submit',packageId:selected.id,packageRevision:selected.revision,
       reference:$('payment-reference').value.trim(),screenshot
     };
     if(!pendingPayment||pendingPayment.account!==account||
-      pendingPayment.packageId!==payload.packageId||pendingPayment.reference!==payload.reference||
+      pendingPayment.packageId!==payload.packageId||pendingPayment.packageRevision!==payload.packageRevision||
+      pendingPayment.reference!==payload.reference||
       pendingPayment.screenshot!==payload.screenshot)
       pendingPayment={...payload,account,requestId:crypto.randomUUID()};
     const result=await request(v3Path('payments'),pendingPayment);
@@ -630,3 +677,43 @@ $('payment-form').addEventListener('submit',event=>{
     note(result.status==='pending'?'Payment evidence submitted. Awaiting review.':'This payment has already been reviewed.');
   });
 });
+
+function coinPackageForm(item=null){
+  const form=element('form',undefined,'v3-form');
+  const packageId=item?.id||crypto.randomUUID();
+  const coins=v3Field(form,'Coins',v3Input('number',{
+    min:1,max:1000000,step:1,required:true,value:item?.coins??''
+  }));
+  const naira=v3Field(form,'Price (₦)',v3Input('number',{
+    min:1,max:100000000,step:1,required:true,value:item?.naira??''
+  }));
+  const active=v3Input('checkbox',{checked:item?item.active:true});
+  const toggle=element('label','Available to buy','reward-toggle');
+  toggle.prepend(active);form.append(toggle);
+  v3Submit(form,item?'Save package':'Add package',async()=>{
+    await request(v3Path('packages'),{
+      packageId,expectedRevision:item?.revision??null,coins:Number(coins.value),naira:Number(naira.value),active:active.checked
+    });
+    await loadFounderPackages();
+    note(item?'Coin package updated.':'Coin package added.');
+  });
+  return form;
+}
+let founderPackageLoad=0;
+async function loadFounderPackages(){
+  const version=++founderPackageLoad,account=current?.user?.email;
+  const host=$('founder-packages');
+  v3Text(host,'Loading coin packages…');
+  const {packages}=await request(v3Path('packages',{manage:1}));
+  if(version!==founderPackageLoad||!current?.user?.isOwner||current?.user?.email!==account)return;
+  host.replaceChildren(element('h3','Add a package'),coinPackageForm(),element('h3','Your packages'),
+    v3Button('Refresh package list',loadFounderPackages));
+  if(!packages.length)host.append(element('p','No packages configured yet.','muted'));
+  for(const item of packages){
+    const card=element('details',undefined,'v3-record');
+    card.append(element('summary',numberFormat.format(item.coins)+' coins · ₦'+numberFormat.format(item.naira)+' · '+(item.active?'Active':'Inactive')),
+      coinPackageForm(item));
+    host.append(card);
+  }
+}
+bindPanel('founder-packages-panel',loadFounderPackages);
