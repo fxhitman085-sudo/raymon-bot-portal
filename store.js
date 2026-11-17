@@ -1,3 +1,4 @@
+const community=require('./community');
 const {DEFAULTS,validate,groupId,groupOptions}=require('./bot-settings');
 const {DatabaseSync}=require('node:sqlite');
 const {PortalV3,ACCOUNT_PERMISSIONS,ADMIN_ACTIONS}=require('./portal-v3');
@@ -137,6 +138,7 @@ class Store {
       }
     });
     this.v3=new PortalV3(this,PortalError);
+    community.init(this);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
   all(sql,...params){return this.db.prepare(sql).all(...params);}
@@ -678,6 +680,7 @@ class Store {
         const restart=this.get('SELECT token FROM portal_restart WHERE deployment_id=?',d.id)?.token;
         return {id:d.id,phone:d.phone,generation:d.generation,intent:d.intent,
           ...(restart?{restart}:{}),
+          community:community.task(this,d),
           pairUntil:d.pair_until,permitUntil:d.paid_until>now?Math.min(d.paid_until,now+12_000):0,
           ...(groups&&!groups.result&&groups.generation===d.generation?{groups}:{}),
           ...(settings?.revision?{settings:{revision:settings.revision,patch:JSON.parse(settings.patch)}}:{})};
@@ -694,6 +697,7 @@ class Store {
     if(restart&&r.restart!==restart)return;
     const user=this.user(d.user_id);
     if(!user||user.banned)return;
+    community.report(this,d,r,now);
     this.reportSettings(d.id,r.settings);
     const groups=this.groupRequests.get(d.id);
     if(groups&&!groups.result&&groups.generation===d.generation&&r.groups?.token===groups.token){
@@ -747,3 +751,4 @@ class Store {
   }
 }
 module.exports={Store,PortalError,DAY,PRICE,OWNER_EMAIL,BAN_MESSAGE};
+
