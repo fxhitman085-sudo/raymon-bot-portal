@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c1010">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d0e">
   <meta name="description" content="Link WhatsApp to RAYMON BOT and manage your bot, pairing and coins in one dashboard.">
   <title>RAYMON BOT — WhatsApp Dashboard</title>
   <link rel="stylesheet" href="/style.css">
@@ -12,20 +12,24 @@
 <body>
   <header class="top"><div class="shell nav">
     <a class="brand" href="/" aria-label="RAYMON BOT home"><span class="mark" aria-hidden="true">R</span><span>RAYMON<span class="brand-bot"> BOT</span></span></a>
-    <span class="nav-note"><span class="dot"></span> WHATSAPP BOT PORTAL</span>
-    <button id="sign-out" class="button subtle" type="button" hidden>Sign out</button>
+    
+    <div class="actions">
+      <a id="sign-in-link" class="button quiet" href="#account">Sign in</a>
+      <button id="sign-out" class="button quiet" type="button" hidden>Sign out</button>
+    </div>
   </div></header>
   <main class="shell">
     <p id="notice" class="notice" role="status" hidden></p>
     <section id="landing" class="landing">
-      <div class="hero">
-        <img class="hero-art" src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536">
-        <h1>Your WhatsApp.<br><em>Your bot.</em></h1>
-        <p class="intro">Link your number, start RAYMON BOT and manage your time from one private dashboard.</p>
-        <p class="small first">Your first 24 hours are covered by 10 free coins.</p>
+      <div id="landing-hero" class="hero">
+        <p class="hero-kicker">WhatsApp automation</p>
+        <h1>Your WhatsApp bot,<br> ready to deploy.</h1>
+        <p class="intro">Connect your number, set up automatic replies, and manage each bot from one dashboard.</p>
+        <button id="deploy-cta" class="button primary" type="button">Deploy a bot <span aria-hidden="true">↗</span></button>
+        <div class="hero-visual"><img src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536"></div>
+        <p class="landing-price">Start with 10 free coins. A bot costs 10 coins per 24 hours.</p>
       </div>
-      <div class="feature auth-card">
-        <div class="feature-head"><span class="dot"></span><span>YOUR PORTAL ACCOUNT</span></div>
+      <div id="account" class="feature auth-card">
         <div class="tabs auth-tabs" aria-label="Account options">
           <button id="auth-login" class="button subtle selected" type="button" aria-pressed="true">Sign in</button>
           <button id="auth-register" class="button subtle" type="button" aria-pressed="false">Create account</button>
@@ -57,10 +61,13 @@
       </div>
     </section>
     <section id="dashboard" hidden>
-      <div class="desk-head">
-        <div><p class="eyebrow">YOUR CONTROL CENTER</p><h1 id="greeting" class="dash-title">Dashboard</h1><p class="muted" id="account-email"></p></div>
-        <div class="tabs" aria-label="Dashboard views"><button id="view-bot" class="button subtle selected" type="button">My bots</button><button id="view-owner" class="button subtle" type="button" hidden>Owner dashboard</button></div>
-      </div>
+      <nav class="workspace-nav" aria-label="Workspace">
+        <div class="workspace-account"><strong id="greeting">Account</strong><span id="account-email"></span></div>
+        <button id="view-bot" class="nav-item" type="button" aria-current="page"><span class="nav-icon bots-icon" aria-hidden="true"></span>My bots</button>
+        <button id="view-wallet" class="nav-item" type="button"><span class="nav-icon wallet-icon" aria-hidden="true"></span>Wallet</button>
+        <button id="view-owner" class="nav-item" type="button" hidden><span class="nav-icon admin-icon" aria-hidden="true"></span>Admin</button>
+      </nav>
+      <div class="workspace-content">
       <article id="password-setup" class="panel password-setup" hidden>
         <h2>Set a password for this account</h2>
         <p class="muted">Use a new password of at least 12 characters to keep your existing account and coin balance.</p>
@@ -71,20 +78,25 @@
         </form>
       </article>
       <div id="bot-view">
-        <div class="metrics">
-          <article class="metric"><p>COIN BALANCE</p><strong id="balance">0</strong><span>coins available</span></article>
-          <article class="metric"><p>SELECTED BOT</p><strong id="bot-state" class="medium">Not linked</strong><span id="bot-phone">No WhatsApp number</span></article>
-          <article class="metric"><p>NEXT RENEWAL</p><strong id="paid-until" class="medium">—</strong><span id="renewal-detail">10 coins per 24 hours</span></article>
-        </div>
-        <section class="bot-fleet panel" aria-labelledby="bots-heading">
-          <div class="owner-head"><h2 id="bots-heading">Your bots</h2><button id="add-bot" class="button primary" type="button">Add WhatsApp bot</button></div>
+        <section id="deployments-view" aria-labelledby="bots-heading">
+          <div class="page-heading">
+            <h1 id="bots-heading" tabindex="-1">My bots</h1>
+            <button id="add-bot" class="button primary" type="button"><span aria-hidden="true">+</span> Add bot</button>
+          </div>
+          <p id="low-balance-alert" class="notice" role="status" hidden></p>
           <div id="bot-list" class="bot-list"></div>
         </section>
-        <p id="low-balance-alert" class="notice" role="status" hidden></p>
-        <div class="panels">
-          <article class="panel">
-            <img id="link-art" class="link-art" src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536">
-            <p class="eyebrow">CONNECTION</p><h2 id="connection-title">Link WhatsApp</h2>
+        <section id="manage-view" aria-labelledby="manage-title" hidden>
+          <button id="back-to-bots" class="button quiet back" type="button"><span aria-hidden="true">←</span> My bots</button>
+          <div class="page-heading manage-heading">
+            <h1 id="manage-title" tabindex="-1">Manage bot</h1>
+            <span id="bot-state" class="bot-status"></span>
+          </div>
+          <article id="connection-panel" class="panel connection-panel">
+            <div id="connection-head" class="connection-head">
+              <h2 id="connection-title">Link WhatsApp</h2>
+              <div id="bot-renewal" class="connection-renewal" hidden><span>Next renewal</span><strong id="paid-until">—</strong><small id="renewal-detail"></small></div>
+            </div>
             <p id="connection-info" class="muted">Use a WhatsApp account you control.</p>
             <p id="connection-diagnostics" class="small" hidden></p>
             <form id="pair-form">
@@ -108,8 +120,8 @@
               <p class="muted">In WhatsApp, open <b>Linked devices → Link a device → Link with phone number instead</b>. Enter the code there. Keep it private.</p>
               <p id="expires" class="small"></p>
             </div>
-            <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
-            <details id="bot-settings-panel" class="settings-panel" hidden>
+          </article>
+            <details id="bot-settings-panel" class="panel settings-panel" hidden>
               <summary>Settings</summary>
               <p id="settings-status" class="small" role="status"></p>
               <form id="edit-settings-form">
@@ -130,10 +142,20 @@
                 </form>
               </details>
             </details>
-            <button class="button subtle" id="cancel-bot" type="button" hidden>Cancel bot</button>
-          </article>
-          <article class="panel">
-            <p class="eyebrow">WALLET</p><h2>Coin activity</h2>
+          <div id="bot-access" class="access-panel" hidden>
+            <h2>Bot access</h2>
+            <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
+            <button class="button subtle" id="cancel-bot" type="button">Cancel bot</button>
+          </div>
+        </section>
+      </div>
+      <section id="wallet-view" aria-labelledby="wallet-heading" hidden>
+        <div class="page-heading"><h1 id="wallet-heading" tabindex="-1">Wallet</h1></div>
+        <div class="wallet-grid">
+          <article class="panel wallet-balance">
+            <span>Available balance</span>
+            <h2><strong id="balance">0</strong> <small>coins</small></h2>
+            <p class="muted">10 coins per bot every 24 hours</p>
             <details id="transfer-panel">
               <summary>Send coins</summary>
               <form id="transfer-form">
@@ -148,12 +170,15 @@
                 <div class="actions"><button id="confirm-transfer" class="button primary" type="button">Confirm transfer</button><button id="edit-transfer" class="button subtle" type="button">Edit</button></div>
               </div>
             </details>
+          </article>
+          <article class="panel wallet-activity">
+            <h2>Activity</h2>
             <ul id="history" class="history"></ul>
           </article>
         </div>
-      </div>
-      <section id="owner-view" class="panel" hidden>
-        <div class="owner-head"><div><p class="eyebrow">OWNER ACCESS</p><h2>Manage accounts</h2><p class="muted">Adjust balances, review activity and manage access.</p></div>
+      </section>
+      <section id="owner-view" hidden>
+        <div class="owner-head"><h1 id="owner-heading" tabindex="-1">Manage accounts</h1>
         <form id="search-form"><label for="search">Search users</label><div class="actions"><input id="search" placeholder="Name, email or number" maxlength="100"><button class="button subtle">Search</button></div></form></div>
         <div class="table-scroll"><table><thead><tr><th>User</th><th>Coins</th><th>Account status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
         <div id="admin-detail" class="admin-detail" hidden>
@@ -168,8 +193,9 @@
           <div class="panels audit"><div><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div><h3>Owner actions</h3><ul class="history" id="selected-audit"></ul></div></div>
         </div>
       </section>
+      </div>
     </section>
-    <footer><span><b>RAYMON BOT</b> / WhatsApp dashboard</span><span>Independent deployment portal</span></footer>
+    <footer id="site-footer">RAYMON BOT <span>WhatsApp automation portal</span></footer>
   </main>
 </body>
 </html>
