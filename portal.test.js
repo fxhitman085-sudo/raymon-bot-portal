@@ -391,6 +391,10 @@ test('bundled runtime loads, applies settings and preserves them when reopened',
   const args={dir:root,authDir:path.join(root,'auth'),phone,id:randomUUID()};
   const first=await createRuntimeBot(args);
   try{
+    const {executeCommand}=require('./bot-runtime/lib/commands');
+    const announcement=await executeCommand({config:first.bot.config,db:first.bot.db,senderNumber:phone.slice(1)},'announce',['Test']);
+    assert.equal(announcement.ok,false);
+    assert.match(announcement.message,/main RAYMON BOT hosted on Bot-Hosting\.net/);
     apply(first.bot,{revision:randomUUID(),patch:{prefix:'!',statusReact:true,statusEmoji:'❤️‍🩹',awayMessage:'Back soon',updateAlerts:false}});
     assert.equal(first.bot.config.prefix,'!');
     assert.equal(read(first.bot).updateAlerts,false);
@@ -442,6 +446,42 @@ test('password changes revoke old sessions and closing an account preserves its 
   assert.equal(store.deployments(account.id).length,0);
   assert.equal((await post('/api/auth/login',{email:account.email,password:replacement})).status,401);
   assert.equal(store.issuePasswordReset(account.email,'test'),false);
+});
+
+test('a portal ban signs out the user and blocks sign-in until unbanned',async t=>{
+  const {store,owner}=fixture(t);
+  const origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>server.close());
+  const api=(route,body,cookie='')=>fetch('http://127.0.0.1:'+server.address().port+route,{
+    ...(body?{method:'POST',body:JSON.stringify(body)}:{}),
+    headers:{origin,cookie,'Content-Type':'application/json'}
+  });
+  const account={email:'ban-test@example.test',password,name:'Ban Test'};
+  const signup=await api('/api/auth/register',account);
+  assert.equal(signup.status,201);
+  const oldCookie=signup.headers.get('set-cookie').split(';')[0];
+  const id=store.password(account.email).user_id;
+  const change=action=>store.admin(owner,id,{action,reason:'Access control test'});
+
+  assert.equal(store.issuePasswordReset(account.email,'a'.repeat(43)),true);
+  change('ban');
+  assert.equal(store.passwordReset('a'.repeat(43)),undefined);
+  assert.equal(store.issuePasswordReset(account.email,'b'.repeat(43)),false);
+  assert.equal((await (await api('/api/me',null,oldCookie)).json()).user,null);
+  assert.equal((await api('/api/profile',{name:'Ban Test'},oldCookie)).status,401);
+  assert.equal((await api('/api/auth/login',{...account,password:'wrong'})).status,401);
+  const blocked=await api('/api/auth/login',account);
+  assert.equal(blocked.status,403);
+  assert.equal(blocked.headers.get('set-cookie'),null);
+  assert.equal((await blocked.json()).error,'You have been banned. Kindly contact the support team.');
+
+  change('unban');
+  assert.equal((await (await api('/api/me',null,oldCookie)).json()).user,null);
+  const restored=await api('/api/auth/login',account);
+  assert.equal(restored.status,200);
+  assert.equal((await restored.json()).user.coins,10);
 });
 
 test('portal notifications and event logs are scoped and persisted',t=>{

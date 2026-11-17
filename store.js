@@ -6,6 +6,7 @@ const DAY=86_400_000, PRICE=10, PAIR_WINDOW=180_000;
 const PAIRING_REPORT_TTL=12_000;
 const LOW_BALANCE_WINDOW=6*60*60_000, RESET_WINDOW=30*60_000;
 const OWNER_EMAIL='abdulganiy346@gmail.com';
+const BAN_MESSAGE='You have been banned. Kindly contact the support team.';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 class PortalError extends Error {
   constructor(status,message){super(message);this.status=status;}
@@ -156,7 +157,8 @@ class Store {
   issuePasswordReset(email,token){
     return this.tx(()=>{
       const saved=this.password(email);
-      if(!saved||this.user(saved.user_id)?.closed_at)return false;
+      const user=saved&&this.user(saved.user_id);
+      if(!user||user.banned||user.closed_at)return false;
       const now=this.clock();
       this.run('DELETE FROM password_resets WHERE expires<=?',now);
       this.run('INSERT INTO password_resets VALUES (?,?,?)',hash(token),email,now+RESET_WINDOW);
@@ -165,7 +167,8 @@ class Store {
   }
   passwordReset(token){
     if(typeof token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(token))return null;
-    return this.get('SELECT email FROM password_resets WHERE token=? AND expires>?',hash(token),this.clock());
+    return this.get(`SELECT r.email FROM password_resets r JOIN passwords p ON p.email=r.email
+      JOIN users u ON u.id=p.user_id WHERE r.token=? AND r.expires>? AND u.banned=0`,hash(token),this.clock());
   }
   resetPassword(token,digest){
     this.tx(()=>{
@@ -308,7 +311,7 @@ class Store {
     if(!token||token.length>100)return null;
     const row=this.get('SELECT user_id FROM sessions WHERE token=? AND expires>?',hash(token),this.clock());
     const user=row&&this.user(row.user_id);
-    return user&&!user.closed_at?user:null;
+    return user&&!user.banned&&!user.closed_at?user:null;
   }
   logout(token){if(token)this.run('DELETE FROM sessions WHERE token=?',hash(token));}
   deployments(userId){return this.all("SELECT * FROM deployments WHERE user_id=? AND state<>'cancelled' ORDER BY requested,id",userId);}
@@ -318,7 +321,7 @@ class Store {
   }
   requireActive(userId){
     const user=this.user(userId);
-    if(!user||user.banned)throw new PortalError(403,'This account is suspended.');
+    if(!user||user.banned)throw new PortalError(403,BAN_MESSAGE);
     return user;
   }
   pair(userId,phone,{add=false,id,settings}={}){
@@ -463,7 +466,13 @@ class Store {
         this.credit(targetId,delta,'owner_adjustment',reason,actorId);
       }else{
         if(target.is_owner&&action==='ban')throw new PortalError(409,'The owner account is protected.');
-        if(action==='ban'||action==='unban')this.run('UPDATE users SET banned=? WHERE id=?',Number(action==='ban'),targetId);
+        if(action==='ban'||action==='unban'){
+          this.run('UPDATE users SET banned=? WHERE id=?',Number(action==='ban'),targetId);
+          if(action==='ban'||target.banned){
+            this.run('DELETE FROM sessions WHERE user_id=?',targetId);
+            this.run('DELETE FROM password_resets WHERE email=?',target.email);
+          }
+        }
         if(action!=='unban'){
           this.run("UPDATE deployments SET intent='pause',state='paused',pair_until=0 WHERE user_id=? AND state<>'cancelled'",targetId);
           for(const d of this.deployments(targetId))this.codes.delete(d.id);
@@ -620,4 +629,4 @@ class Store {
     }
   }
 }
-module.exports={Store,PortalError,DAY,PRICE,OWNER_EMAIL};
+module.exports={Store,PortalError,DAY,PRICE,OWNER_EMAIL,BAN_MESSAGE};

@@ -4,7 +4,7 @@ const path=require('node:path');
 const {randomBytes,scrypt,timingSafeEqual}=require('node:crypto');
 const {promisify}=require('node:util');
 const {isIP}=require('node:net');
-const {Store,PortalError,OWNER_EMAIL}=require('./store');
+const {Store,PortalError,OWNER_EMAIL,BAN_MESSAGE}=require('./store');
 const {startWorker}=require('./worker');
 const derive=promisify(scrypt);
 const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
@@ -123,6 +123,7 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
     try{return await digest(password,salt);}finally{running--;}
   }
   function finishAuth(res,session,user,status,remember=true){
+    if(user.banned)throw new PortalError(403,BAN_MESSAGE);
     const token=random();
     store.logout(session);
     store.putSession(user.id,token);

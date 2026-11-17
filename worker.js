@@ -167,6 +167,12 @@ async function createRuntimeBot({dir,authDir,phone,id}){
   const {Database}=require('./bot-runtime/lib/database');
   const {UpdateAlerts}=require('./bot-runtime/lib/updates');
   const {commandMap}=require('./bot-runtime/lib/commands');
+  const announce=commandMap.get('announce');
+  if(announce?.mainOwnerOnly)commandMap.set('announce',{
+    ...announce,
+    mainOwnerOnly:false,
+    execute:()=>({ok:false,message:'Use .announce on the main RAYMON BOT hosted on Bot-Hosting.net. Website-deployed bots manage their own WhatsApp account.'})
+  });
   for(const command of [...require('./bot-runtime/commands/account'),...require('./bot-runtime/commands/away')]){
     if(!commandMap.has(command.name))commandMap.set(command.name,command);
   }
