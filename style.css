@@ -130,6 +130,7 @@ small,.small { font-size:.85rem; }
 .empty-state { border:1px dashed var(--line); border-radius:13px; padding:32px 20px; }
 .empty-state p { color:var(--muted); margin-top:5px; }
 .back { padding-left:0; margin-bottom:9px; }
+.back-icon { width:8px; height:8px; border-bottom:1.5px solid currentColor; border-left:1.5px solid currentColor; transform:rotate(45deg); margin-left:3px; }
 .manage-heading { justify-content:flex-start; flex-wrap:wrap; }
 .manage-heading h1 { font-size:clamp(1.9rem,3.8vw,3rem); }
 .connection-panel.pairing { background:linear-gradient(140deg,#1c2025,var(--surface) 72%); }
