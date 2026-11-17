@@ -22,13 +22,13 @@ For an existing two-service deployment, set `PORTAL_RUN_WORKER=0` on the website
 | Data variable | `PORTAL_DATA_DIR=/data/portal` | `WORKER_DATA_DIR=/data/worker` |
 | Control token | `WORKER_TOKEN=<long random secret>` | Same `WORKER_TOKEN` |
 | Portal address | `PUBLIC_ORIGIN=https://<portal-domain>` | `PORTAL_INTERNAL_URL=http://<portal-private-domain>:<portal-PORT>` |
-| Other | `OWNER_SIGNUP_TOKEN` for initial owner registration; optional `MAX_BOTS` (default 8, supported 1–30) | Optional `GEMINI_API_KEY` dedicated to this project |
+| Other | Optional `MAX_BOTS` (default 8, supported 1–30) | Optional `GEMINI_API_KEY` dedicated to this project |
 
 Set the portal service's health check to `/health`. Configure the worker's internal address with the exact private DNS name and port shown by Railway. Generate the shared control token with `openssl rand -hex 32`. Store both tokens in Railway service variables, outside Git. Consider starting with `MAX_BOTS=2` while testing host capacity.
 
-Set `OWNER_SIGNUP_TOKEN` on the **website service** to a new random secret of at least 32 characters, different from `WORKER_TOKEN`. Deploy the change, then select **Create account** on the website with the owner email configured in `store.js`. Under **Setting up the owner account?**, enter the setup token and choose a unique password of at least 12 characters. The token cannot replace an existing owner password. After the owner can sign in, remove the setup token from the website variables. Ordinary sign-ups need only a name, email, and password.
+The Founder is the existing account pinned in the SQLite `owner` table. Public signup creates regular accounts only. For an existing installation, retain the current database when deploying Version 3.0. The server no longer reads `OWNER_SIGNUP_TOKEN`.
 
-The migration preserves account IDs, balances, bot deployments, and valid sessions on the existing database. A user still signed in from the old system can set a password in their dashboard. The pinned owner can migrate with the setup token. Password recovery is available for accounts with password sign-in configured.
+The migration preserves account IDs, balances, bot deployments, and valid sessions on the existing database. A user still signed in from the old system can set a password in their dashboard. Password recovery is available for accounts with password sign-in configured.
 
 ### Password recovery and low-balance email
 
@@ -44,7 +44,7 @@ Use a spare WhatsApp number that is absent from your existing Bot-Hosting.net de
 - The worker must verify that the connected WhatsApp identity matches the requested number. A successfully connected, eligible bot buys a 24-hour period for 10 coins. Pairing requests and failed links do not debit coins.
 - When paid time expires the worker renews only while connected and with enough coins. The same paid period cannot be charged twice. If the wallet cannot renew, the bot stops and saved credentials remain. Adding enough coins to an eligible low-balance bot lets it reconnect automatically.
 - Pausing manually or being banned stops the bot. The existing paid period continues to elapse. Unbanning restores dashboard actions; the user chooses Resume. If WhatsApp unlinks the session the portal offers a new code.
-- Owner coin adjustments require a reason and are audited. V1 has no checkout; the owner grants and removes coins. The portal's owner role does not grant access to any user's WhatsApp messages or pairing code.
+- Owner coin adjustments require a reason and are audited. Buy Coins has no checkout. Authorized admins can adjust coins, and the Founder can issue promotional codes. The portal's owner role does not grant access to any user's WhatsApp messages or pairing code.
 - Users can send whole coins to another active password-enabled account using its portal email. Both wallets get a ledger entry and the transfer completes as one transaction.
 - The worker polls the web service and stops responding when its short authorization expires. Railway failures can affect portal bots; the existing Bot-Hosting.net deployment does not depend on the portal.
 
@@ -66,3 +66,11 @@ Add two secrets in the portal repository under **Settings → Secrets and variab
 Use repository-scoped fine-grained tokens. Paste the values into GitHub Actions secrets. Run **Sync RAYMON BOT** once and check the GitHub run and Railway deployment. Source dependency changes require a compatible portal lockfile before the workflow will publish. On success `bot-runtime-version.json` records the exact upstream commit; older bundles are unversioned. Visit the portal’s `/version` endpoint to see which source commit production is running.
 
 Railway should remain connected to portal `main` with autodeploy enabled. The portal worker restarts on each deployment and opens eligible saved sessions from the existing volume with the new bundle, so website users keep their WhatsApp linking and settings.
+
+## Version 3.0
+
+- Open **Support Tickets** for the personal inbox and screenshots. Staff use **Admin Dashboard → Support inbox**. Reply, assign, and close permissions also require inbox access.
+- Redeem promo codes in **My Coins**. The Founder configures codes and their activation, expiry, reward and redemption limit under **Founder Dashboard → Promotional Coin Codes**.
+- New users can follow the setup guide from the dashboard. Restart it under **My Profile → Profile Information**.
+- The referral leaderboard uses Lagos time. Weekly rounds start Monday. A referral qualifies when an invitee brings a unique WhatsApp number online with an active paid period. Historical qualification uses records available at migration. Existing referral bonuses retain their configured trigger. The Founder can set prizes independently for each period. Automatic awards run for closed daily, weekly, and monthly rounds. All-time awards use one Founder-approved settlement.
+- The Founder can appoint staff through **Search users → Manage** and configure each rank independently under **Administrators and Permissions**. All ranks start with no permissions. The **Admin Activity Log** shows Version 3.0 staff changes and privileged actions.

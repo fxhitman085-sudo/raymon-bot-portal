@@ -8,6 +8,7 @@
   <title>RAYMON BOT — WhatsApp Dashboard</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
+  <script src="/portal-v3-ui.js" defer></script>
 </head>
 <body>
   <header class="top"><div class="shell nav">
@@ -48,10 +49,7 @@
           <div id="auth-confirm-field" hidden><label for="auth-confirm">Confirm password</label><input id="auth-confirm" type="password" autocomplete="new-password" maxlength="128" disabled></div>
           <label id="remember-field" class="remember"><input id="remember-session" type="checkbox" checked> Remember session</label>
           <p id="auth-password-hint" class="small" hidden>Use at least 12 characters.</p>
-          <details id="auth-owner" hidden>
-            <summary>Setting up the owner account?</summary>
-            <label for="auth-owner-token">One-time owner setup token</label><input id="auth-owner-token" type="password" autocomplete="off" maxlength="256" disabled>
-          </details>
+
           <button id="auth-submit" class="button primary" type="submit">Sign in</button>
           <button id="show-recovery" class="button subtle" type="button" hidden>Forgot password?</button>
         </form>
@@ -101,6 +99,8 @@
         <button id="view-community" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg>Community</button>
         <button id="view-profile" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>My Profile</button>
         <button id="view-owner" class="nav-item" type="button" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3 8-11V5l-8-3-8 3v6c0 8 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg>Admin</button>
+        <button id="view-rankings" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8m-4-4v4M7 4h10v7a5 5 0 0 1-10 0V4ZM7 6H3v2a4 4 0 0 0 4 4m10-6h4v2a4 4 0 0 1-4 4"/></svg>Leaderboard</button>
+        <button id="view-tickets" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6H4v12h16zM4 14h5l2 2h2l2-2h5M8 9h8"/></svg>Support Tickets</button>
         <button id="sign-out" class="nav-item signout" type="button">Sign out</button>
       </nav>
       <div class="workspace-content">
@@ -134,8 +134,9 @@
         </div>
         <p id="dashboard-low-balance" class="notice" role="status" hidden></p>
         <article id="dashboard-empty" class="panel empty-dashboard"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 13h.01M15 13h.01M9 17h6M2 11v5m20-5v5"/></svg><h2>No Bots Deployed Yet</h2><p>Your hosting journey starts here. Deploy your first WhatsApp bot in minutes.</p><button id="first-deploy" class="button primary" type="button">Deploy Your First Bot</button></article>
+        <article id="onboarding-card" class="panel referral-panel" hidden><h2>Set up your first bot</h2><div class="actions"><button id="continue-guide" class="button primary" type="button">Start guide</button><button id="skip-guide" class="button subtle" type="button">Skip</button></div></article>
         <article class="panel referral-panel"><h2>Daily Bonus</h2><p id="daily-bonus-status" class="muted" aria-live="polite"></p><button id="claim-daily" class="button primary" type="button" hidden>Claim Daily Bonus</button></article>
-        <article class="panel referral-panel"><h2>Referral Program</h2><p id="referral-reward" class="muted"></p><div class="copy-row"><input id="home-referral" aria-label="Referral link" readonly><button class="button subtle copy-referral" type="button">Copy</button></div><p id="referral-stats" class="small"></p><p id="referral-welcome" class="small" hidden></p></article>
+        <article class="panel referral-panel"><h2>Referral Program</h2><p id="referral-reward" class="muted"></p><div class="copy-row"><input id="home-referral" aria-label="Referral link" readonly><button class="button subtle copy-referral" type="button">Copy</button></div><p id="referral-stats" class="small"></p><p id="referral-welcome" class="small" hidden></p><button id="home-rankings" class="button subtle" type="button">View leaderboard</button></article>
       </section>
       <div id="bot-view">
         <section id="deployments-view" aria-labelledby="bots-heading">
@@ -219,6 +220,10 @@
             <span>Available balance</span>
             <h2><strong id="balance">0</strong> <small>coins</small></h2>
             <p class="muted">10 coins per bot every 24 hours</p><p id="wallet-renewal" class="small"></p><button id="wallet-buy" class="button primary" type="button">Buy Coins</button>
+            <details id="promo-panel">
+              <summary>Redeem a promo code</summary>
+              <form id="redeem-form"><label for="redeem-code">Promo code</label><input id="redeem-code" maxlength="32" minlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" required><button type="submit" class="button primary">Redeem code</button></form>
+            </details>
             <details id="transfer-panel">
               <summary>Send coins</summary>
               <form id="transfer-form">
@@ -269,6 +274,7 @@
           <form id="profile-form"><label for="profile-name">Display Name</label><input id="profile-name" autocomplete="name" maxlength="90" required>
           <label for="profile-username">Username</label><input id="profile-username" autocomplete="username" maxlength="24" pattern="[A-Za-z0-9_]{3,24}">
           <label for="profile-address">Email</label><input id="profile-address" readonly>
+          <button id="restart-guide" class="button subtle" type="button">Restart setup guide</button>
           <label for="profile-referral">Referral Link</label><div class="copy-row"><input id="profile-referral" readonly><button class="button subtle copy-referral" type="button">Copy</button></div>
           <button class="button primary" type="submit">Save Changes</button></form></article>
         <article id="profile-security" class="panel profile-panel" hidden><h2>Account Security</h2>
@@ -284,11 +290,32 @@
           <label for="close-confirm">Type DELETE to confirm</label><input id="close-confirm" pattern="DELETE" autocomplete="off" required>
           <button type="submit" class="button danger">Delete Account</button></form></article>
       </section>
+      <section id="rankings-view" hidden>
+        <div class="page-heading"><h1 id="rankings-heading" tabindex="-1">Referral Leaderboard</h1><p class="muted">A referral counts when your invitee brings a unique WhatsApp number online. Periods use Nigeria time.</p></div>
+        <article class="panel">
+          <div class="v3-fields"><div><label for="rank-period">Ranking period</label><select id="rank-period"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="all">All time</option></select></div>
+          <div><label for="rank-previous">Period to show</label><select id="rank-previous"><option value="0">Current period</option><option value="1">Previous period</option></select></div></div>
+          <p id="rank-range" class="small"></p><p id="rank-prizes" class="small"></p><ol id="rank-list" class="v3-list" aria-live="polite"></ol>
+        </article>
+      </section>
+      <section id="tickets-view" hidden>
+        <div class="page-heading"><h1 id="tickets-heading" tabindex="-1">Support Tickets</h1></div>
+        <div class="v3-stack">
+          <details class="panel" id="new-ticket"><summary>Open a support ticket</summary>
+            <form id="ticket-create"><label for="ticket-subject">Subject</label><input id="ticket-subject" maxlength="120" required>
+              <label for="ticket-message">How can we help?</label><textarea id="ticket-message" maxlength="4000" rows="4" required></textarea>
+              <label for="ticket-file">Screenshot (optional, up to 3 MB)</label><input id="ticket-file" type="file" accept="image/jpeg,image/png,image/webp">
+              <button class="button primary" type="submit">Send ticket</button>
+            </form>
+          </details>
+          <div id="ticket-inbox"></div>
+        </div>
+      </section>
       <section id="owner-view" hidden>
-        <div class="owner-head"><h1 id="owner-heading" tabindex="-1">Manage accounts</h1>
+        <div class="owner-head"><h1 id="owner-heading" tabindex="-1">Admin Dashboard</h1>
         <form id="search-form"><label for="search">Search users</label><div class="actions"><input id="search" placeholder="Name, email or number" maxlength="100"><button class="button subtle">Search</button></div></form></div>
         <p id="platform-stats" class="small"></p>
-        <details class="panel admin-announcements"><summary>Daily Bonus and Referral Program</summary>
+        <details id="founder-rewards" class="panel admin-announcements"><summary>Daily Bonus and Referral Program</summary>
           <form id="rewards-form">
             <fieldset><legend>Daily Bonus</legend>
               <label class="reward-toggle"><input id="daily-enabled" type="checkbox"> Enable daily bonus</label>
@@ -305,29 +332,43 @@
             <button class="button primary" type="submit">Save Reward Settings</button>
           </form>
         </details>
-        <details class="panel admin-announcements"><summary>Publish an announcement</summary><form id="announcement-form">
+        <details id="staff-announcements" class="panel admin-announcements"><summary>Publish an announcement</summary><form id="announcement-form">
           <label for="announcement-title">Title</label><input id="announcement-title" required maxlength="90">
           <label for="announcement-body">Announcement</label><textarea id="announcement-body" required maxlength="1600" rows="4"></textarea>
           <button type="submit" class="button primary">Publish</button>
         </form></details>
-        <div class="table-scroll"><table><thead><tr><th>User</th><th>Coins</th><th>Account status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
+        <div id="staff-accounts" class="table-scroll"><table><thead><tr><th>User</th><th id="staff-coin-heading">Coins</th><th>Account status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
         <div id="admin-detail" class="admin-detail" hidden>
-          <h3 id="selected-user"></h3>
+          <h3 id="selected-user" tabindex="-1"></h3>
           <form id="owner-action" class="owner-form">
             <div><label for="action">Action</label><select id="action"><option value="grant">Add coins</option><option value="remove">Remove coins</option><option value="pause">Pause all bots</option><option value="ban">Ban user</option><option value="unban">Unban user</option></select></div>
             <div id="amount-field"><label for="amount">Coins</label><input id="amount" type="number" min="1" max="100000" value="10" inputmode="numeric"></div>
             <div><label for="reason">Reason</label><input id="reason" maxlength="180" required placeholder="Reason for this action"></div>
             <button class="button primary">Apply action</button>
           </form>
-          <h3>Deployed bots</h3><div id="selected-bots" class="bot-list"></div>
-          <div class="panels audit"><div><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div><h3>Owner actions</h3><ul class="history" id="selected-audit"></ul></div></div>
+          <div id="staff-bots"><h3>Deployed bots</h3><div id="selected-bots" class="bot-list"></div></div>
+          <div id="appoint-area" hidden><button id="appoint-from-user" class="button subtle" type="button">Set administrator level</button></div>
+          <div class="panels audit"><div id="staff-coin-history"><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div id="founder-account-audit"><h3>Account actions</h3><ul class="history" id="selected-audit"></ul></div></div>
+        </div>
+        <div id="v3-admin-tools" class="v3-stack">
+          <details id="staff-inbox-panel" class="panel" hidden><summary>Support inbox</summary><div id="staff-inbox"></div></details>
+          <details id="staff-promos-panel" class="panel" hidden><summary>Promotional Coin Codes</summary><div id="staff-promos"></div></details>
+          <details id="staff-referrals-panel" class="panel" hidden><summary>Referral Leaderboard Prizes</summary><div id="staff-referrals"></div></details>
+          <details id="founder-staff-panel" class="panel" hidden><summary>Administrators and Permissions</summary><div id="founder-staff"></div></details>
+          <details id="founder-audit-panel" class="panel" hidden><summary>Admin Activity Log</summary><div id="founder-audit"></div></details>
         </div>
       </section>
       </div>
     </section>
     <button id="support-button" class="support-button icon-button" type="button" aria-label="Support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg></button>
+    <dialog id="guide-dialog" class="portal-dialog" aria-labelledby="guide-heading">
+      <div class="dialog-head"><h2 id="guide-heading">Setup guide</h2><form method="dialog"><button class="icon-button" type="submit" aria-label="Close setup guide">×</button></form></div>
+      <p id="guide-progress" class="small"></p><h3 id="guide-title"></h3><p id="guide-copy" class="muted"></p>
+      <button id="guide-jump" type="button" class="button subtle" hidden></button>
+      <div class="actions"><button id="guide-back" type="button" class="button subtle">Back</button><button id="guide-next" type="button" class="button primary">Next</button><button id="guide-skip" type="button" class="button subtle">Skip guide</button></div>
+    </dialog>
     <dialog id="notifications-dialog" class="portal-dialog notification-drawer" aria-labelledby="notifications-heading"><div class="dialog-head"><h2 id="notifications-heading">Notifications</h2><form method="dialog"><button class="icon-button" aria-label="Close notifications"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><div id="notifications-list" class="event-list" aria-live="polite"></div></dialog>
-    <dialog id="support-dialog" class="portal-dialog" aria-labelledby="support-heading"><div class="dialog-head"><h2 id="support-heading">Support</h2><form method="dialog"><button class="icon-button" aria-label="Close support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><p id="support-message" class="muted"></p><a id="support-link" class="button primary" target="_blank" rel="noopener noreferrer" hidden>Contact support</a></dialog>
+    <dialog id="support-dialog" class="portal-dialog" aria-labelledby="support-heading"><div class="dialog-head"><h2 id="support-heading">Support</h2><form method="dialog"><button class="icon-button" aria-label="Close support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><p id="support-message" class="muted"></p><button id="support-inbox-button" class="button primary" type="button" hidden>Open my tickets</button><a id="support-link" class="button subtle" target="_blank" rel="noopener noreferrer" hidden>Contact support</a></dialog>
     <dialog id="events-dialog" class="portal-dialog" aria-labelledby="events-heading"><div class="dialog-head"><h2 id="events-heading">Deployment Logs</h2><form method="dialog"><button class="icon-button" aria-label="Close logs"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><div id="events-list" class="event-list"></div></dialog>
     <footer id="site-footer">RAYMON BOT <span>WhatsApp automation portal</span></footer>
   </main>

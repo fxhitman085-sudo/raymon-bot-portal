@@ -152,10 +152,13 @@ function draw(data){
   $('sign-in-link').hidden=!!user||!!resetToken;
   $('site-footer').hidden=!!user&&!resetToken;
   $('show-recovery').hidden=registering||!data.recoveryAvailable;
-  if(!user||resetToken)return;
+  if(!user||resetToken){
+    $('guide-dialog').close();
+    return;
+  }
   $('greeting').textContent=user.name;
   $('account-email').textContent=user.email;
-  $('view-owner').hidden=!user.isOwner;
+  renderV3Access(user);
   $('password-setup').hidden=!user.needsPassword||user.banned;
   $('balance').textContent=numberFormat.format(user.coins);
   renderOverview(data,deployments);
@@ -463,10 +466,10 @@ async function ownerList(){
   const params=new URLSearchParams({search:$('search').value});
   if(selectedUser)params.set('user',selectedUser.id);
   const data=await request('/api/owner?'+params), table=$('users');
-  renderRewardSettings(data.rewards);
+  if(data.rewards)renderRewardSettings(data.rewards);
   table.replaceChildren();
   const stats=data.stats;
-  if(stats)$('platform-stats').textContent=stats.users+' users · '+stats.deployments+' deployments · '+stats.online+' online · '+stats.charges+' maintenance charges';
+  $('platform-stats').textContent=stats?stats.users+' users · '+stats.deployments+' deployments · '+stats.online+' online · '+stats.charges+' maintenance charges':'';
   for(const user of data.users){
     const row=element('tr'), identity=element('td',user.name);
     identity.append(element('span',user.email,'small'));
@@ -477,10 +480,12 @@ async function ownerList(){
       $('selected-user').textContent='Manage '+user.name;
       $('admin-detail').hidden=false;
       await ownerList();
-      $('action').focus();
+      ($('owner-action').hidden?$('selected-user'):$('action')).focus();
     }));
     const controls=element('td');controls.append(button);
-    row.append(identity,element('td',user.coins),element('td',user.closed_at?'Closed':user.banned?'Suspended':'Active'),controls);
+    row.append(identity);
+    if(can('coins.view'))row.append(element('td',user.coins??''));
+    row.append(element('td',user.closed_at?'Closed':user.banned?'Suspended':user.founder?'Founder':user.staff?'Administrator':'Active'),controls);
     table.append(row);
   }
   if(!data.users.length){
@@ -489,6 +494,7 @@ async function ownerList(){
   }
   if(selectedUser){
     const cards=$('selected-bots'),target=selectedUser;
+    renderAdminAccountControls(target);
     cards.replaceChildren();
     for(const bot of data.deployments){
       const card=element('div',undefined,'bot-card');
@@ -503,7 +509,8 @@ async function ownerList(){
           note('Bot cancelled.');
         });
       });
-      card.append(element('strong',bot.phone),element('span',names[bot.state]||bot.state),cancel);
+      card.append(element('strong',bot.phone),element('span',names[bot.state]||bot.state));
+      if(can('deployments.manage')&&(current.user.isOwner||!target.founder&&!target.staff))card.append(cancel);
       cards.append(card);
     }
     if(!data.deployments.length)cards.append(element('p','No bots deployed.','muted'));
@@ -515,10 +522,11 @@ const workspacePages={
   home:['home-view','view-home','home-heading'],bots:['bot-view','view-bot','bots-heading'],
   deploy:['bot-view','view-deploy','manage-title'],wallet:['wallet-view','view-wallet','wallet-heading'],
   buy:['buy-view','view-buy','buy-heading'],community:['community-view','view-community','community-heading'],
-  profile:['profile-view','view-profile','profile-heading'],owner:['owner-view','view-owner','owner-heading']
+  profile:['profile-view','view-profile','profile-heading'],owner:['owner-view','view-owner','owner-heading'],
+  rankings:['rankings-view','view-rankings','rankings-heading'],tickets:['tickets-view','view-tickets','tickets-heading']
 };
 function renderNavigation(){
-  if(!current?.user?.isOwner&&workspaceView==='owner')workspaceView='home';
+  if(!canAdmin()&&workspaceView==='owner')workspaceView='home';
   for(const [view,[panel,nav]] of Object.entries(workspacePages)){
     if(view!=='deploy'&&view!=='bots')$(panel).hidden=view!==workspaceView;
     if(view===workspaceView)$(nav).setAttribute('aria-current','page');
@@ -590,7 +598,7 @@ for(const [id,view] of [['view-home','home'],['view-wallet','wallet'],['dashboar
   $(id).addEventListener('click',()=>switchView(view));
 }
 $('view-owner').addEventListener('click',()=>action($('view-owner'),async()=>{
-  await ownerList();switchView('owner');
+  await openAdminDashboard();
 }));
 for(const id of ['deploy-cta','public-signup'])$(id).addEventListener('click',()=>openAuth(true));
 for(const id of ['sign-in-link','hero-login','public-login'])$(id).addEventListener('click',event=>{
@@ -638,8 +646,6 @@ function authMode(register){
   $('auth-name-field').hidden=!register;
   $('auth-name').required=register;
   $('auth-name').disabled=!register;
-  $('auth-owner').hidden=!register;
-  $('auth-owner-token').disabled=!register;
   $('auth-password-hint').hidden=!register;
   $('auth-password').autocomplete=register?'new-password':'current-password';
   $('auth-password').minLength=register?12:1;
@@ -693,7 +699,6 @@ $('auth-form').addEventListener('submit',event=>{
       data.username=$('auth-username').value;
       data.confirmation=$('auth-confirm').value;
       data.referral=referral;
-      data.ownerToken=$('auth-owner-token').value;
     }
     const view=await request(registering?'/api/auth/register':'/api/auth/login',data);
     event.target.reset();
@@ -786,7 +791,7 @@ function renderProfile(user){
   $('remove-avatar').hidden=!user.avatarVersion;
   setValue('profile-heading',user.name);
   setValue('profile-email',user.email);
-  setValue('profile-status',user.banned?'Suspended':user.isOwner?'Portal owner':'Active account');
+  setValue('profile-status',user.banned?'Suspended':user.isOwner?'Founder':user.staff?.level?'Adm Lvl '+user.staff.level+(user.staff.suspended?' · Suspended':''):'Active account');
   setValue('profile-balance',numberFormat.format(user.coins)+' coins');
   setValue('profile-code',user.referralCode||'Unavailable');
   setValue('profile-since',user.created?new Date(user.created).toLocaleDateString(undefined,{month:'short',year:'numeric'}):'Unavailable');
@@ -890,6 +895,8 @@ function drawEvents(id,rows,empty,noticeActions=false){
     if(noticeActions){
       entry.classList.toggle('unread',!row.read);
       const controls=element('div',undefined,'actions');
+      if(row.ticketId&&(!row.staffTicket||can('tickets.view')))
+        controls.append(v3Button('Open ticket',()=>openTicketNotice(row),'primary'));
       for(const [command,label] of [['read','Mark as read'],['dismiss','Dismiss']]){
         if(command==='read'&&row.read)continue;
         const button=element('button',label,'button quiet');
@@ -942,11 +949,12 @@ $('view-community').addEventListener('click',async()=>{
 });
 for(const id of ['support-button','community-support'])$(id).addEventListener('click',async()=>{
   openDialog('support-dialog');
+  $('support-inbox-button').hidden=!current?.user;
   setValue('support-message','Checking support options…');
   $('support-link').hidden=true;
   try{
     const {support}=await request('/api/community');
-    setValue('support-message',support?'Get help with your account or bot deployment.':'A support link has not been configured yet.');
+    setValue('support-message',support||current?.user?'Get help with your account or bot deployment.':'Sign in to open a support ticket.');
     if(support){$('support-link').href=support;$('support-link').hidden=false;}
   }catch(error){setValue('support-message',error.message);}
 });
@@ -959,10 +967,10 @@ $('announcement-form').addEventListener('submit',event=>{
   });
 });
 
-refresh().catch(error=>note(error.message,true));
+window.addEventListener('DOMContentLoaded',()=>refresh().catch(error=>note(error.message,true)),{once:true});
 let ticks=0;
 setInterval(()=>{
-  if(document.hidden||!current?.user||workspaceView==='owner')return;
+  if(document.hidden||!current?.user)return;
   ticks++;
   const waiting=(current.deployments||[]).some(bot=>bot.pairingExpires>Date.now());
   if(waiting||ticks%5===0)refresh().catch(()=>{});
