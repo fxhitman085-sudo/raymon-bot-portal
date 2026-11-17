@@ -15,7 +15,8 @@ const note=(message,error=false)=>{
   $('notice').hidden=!message;
 };
 async function request(path,data){
-  const options=data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)};
+  const options=data===undefined?{cache:'no-store'}:data instanceof Blob?{method:'POST',body:data}:
+    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)};
   const response=await fetch(path,{...options,signal:AbortSignal.timeout(15000)}).catch(error=>{
     if(error.name==='TimeoutError')throw new Error('The request timed out. Try again.');
     throw new Error('Could not reach the portal. Check your connection.');
@@ -462,6 +463,7 @@ async function ownerList(){
   const params=new URLSearchParams({search:$('search').value});
   if(selectedUser)params.set('user',selectedUser.id);
   const data=await request('/api/owner?'+params), table=$('users');
+  renderRewardSettings(data.rewards);
   table.replaceChildren();
   const stats=data.stats;
   if(stats)$('platform-stats').textContent=stats.users+' users · '+stats.deployments+' deployments · '+stats.online+' online · '+stats.charges+' maintenance charges';
@@ -722,7 +724,7 @@ function referralUrl(code){
 function setValue(id,value){
   $(id).textContent=String(value);
 }
-function renderOverview({user,capacity,price,workerAvailable},bots){
+function renderOverview({user,capacity,price,workerAvailable,dailyBonus,referralProgram},bots){
   const active=bots.filter(bot=>bot.state==='online').length;
   const renewals=bots.map(bot=>bot.nextRenewal).filter(Boolean);
   const renewal=renewals.length?formatDate(Math.min(...renewals)):'No renewal scheduled';
@@ -741,6 +743,19 @@ function renderOverview({user,capacity,price,workerAvailable},bots){
   setValue('wallet-renewal',renewals.length?'Next deduction '+renewal:renewal);
   $('dashboard-empty').hidden=!!bots.length||user.banned;
   $('home-referral').value=referralUrl(user.referralCode);
+  $('claim-daily').hidden=!dailyBonus.enabled||dailyBonus.claimed;
+  setValue('daily-bonus-status',!dailyBonus.enabled?'The daily bonus is turned off.':
+    dailyBonus.claimed?'Claimed today. Next bonus opens at midnight Nigeria time.':
+    'Claim '+dailyBonus.amount+' coins today. Resets at midnight Nigeria time.');
+  setValue('referral-reward',!referralProgram.enabled?'Referral rewards are currently paused.':
+    'Share your link. You earn '+referralProgram.inviterAmount+' coins and your friend earns '+referralProgram.inviteeAmount+
+    (referralProgram.trigger==='signup'?' coins after signup.':' coins when their first bot goes online.'));
+  setValue('referral-stats',referralProgram.pending+' pending · '+referralProgram.completed+' completed · '+numberFormat.format(referralProgram.earned)+' coins earned');
+  const welcome=referralProgram.ownBonus;
+  $('referral-welcome').hidden=!welcome?.amount;
+  if(welcome?.amount)setValue('referral-welcome',welcome.paidAt===null?
+    'Your '+welcome.amount+'-coin welcome referral bonus is pending.':
+    'Your '+welcome.amount+'-coin welcome referral bonus was paid.');
 }
 function initials(name){
   return name.trim().split(/\s+/).slice(0,2).map(word=>[...word][0]).join('').toUpperCase();
@@ -755,8 +770,20 @@ function renderProfile(user){
     $('theme-select').value=user.theme||'dark';
     document.documentElement.dataset.theme=user.theme||'dark';
   }
-  setValue('avatar-button',initials(user.name));
-  setValue('profile-avatar',initials(user.name));
+  for(const id of ['avatar-button','profile-avatar']){
+    const avatar=$(id),key=user.email+':'+(user.avatarVersion||user.name);
+    if(avatar.dataset.photo===key)continue;
+    avatar.dataset.photo=key;
+    avatar.textContent=initials(user.name);
+    if(user.avatarVersion){
+      const img=element('img');
+      img.alt='';
+      img.src='/api/profile/avatar?v='+encodeURIComponent(user.avatarVersion);
+      img.addEventListener('error',()=>{if(avatar.dataset.photo===key)avatar.textContent=initials(user.name);},{once:true});
+      avatar.replaceChildren(img);
+    }
+  }
+  $('remove-avatar').hidden=!user.avatarVersion;
   setValue('profile-heading',user.name);
   setValue('profile-email',user.email);
   setValue('profile-status',user.banned?'Suspended':user.isOwner?'Portal owner':'Active account');
@@ -783,6 +810,53 @@ function profileTab(name){
 }
 for(const button of document.querySelectorAll('[data-profile-tab]'))button.addEventListener('click',()=>profileTab(button.dataset.profileTab));
 profileTab('information');
+$('avatar-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  action(event.submitter,async()=>{
+    const file=$('avatar-file').files[0];
+    if(!file||file.size>3*1024*1024)throw new Error('Choose a JPG, PNG, or WebP photo under 3 MB.');
+    draw(await request('/api/profile/avatar',file));
+    event.target.reset();
+    note('Profile photo updated.');
+  });
+});
+$('remove-avatar').addEventListener('click',()=>action($('remove-avatar'),async()=>{
+  draw(await request('/api/profile/avatar',{remove:true}));
+  note('Profile photo removed.');
+}));
+$('claim-daily').addEventListener('click',()=>action($('claim-daily'),async()=>{
+  const data=await request('/api/rewards/daily',{});
+  draw(data);
+  note('Daily bonus claimed. '+data.claimedAmount+' coins added.');
+}));
+const rewardFields=[['daily-enabled','dailyEnabled'],['daily-amount','dailyAmount'],
+  ['referral-enabled','referralEnabled'],['inviter-amount','inviterAmount'],['invitee-amount','inviteeAmount'],
+  ['referral-trigger','referralTrigger']];
+function renderRewardSettings({settings,daily,referrals}){
+  const form=$('rewards-form'),stamp=JSON.stringify(settings);
+  if(form.dataset.settings!==stamp){
+    form.dataset.settings=stamp;
+    for(const [id,key] of rewardFields){
+      const field=$(id);
+      if(field.type==='checkbox')field.checked=!!settings[key];
+      else field.value=settings[key];
+    }
+  }
+  setValue('owner-daily-stats',daily.claims+' claims · '+numberFormat.format(daily.paid)+' coins paid');
+  setValue('owner-referral-stats',referrals.pending+' pending · '+referrals.completed+' completed · '+numberFormat.format(referrals.earned)+' coins paid');
+}
+$('rewards-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  action(event.submitter,async()=>{
+    const settings=Object.fromEntries(rewardFields.map(([id,key])=>{
+      const field=$(id);
+      return [key,field.type==='checkbox'?field.checked:field.type==='number'?field.valueAsNumber:field.value];
+    }));
+    await request('/api/owner/rewards',settings);
+    await Promise.all([ownerList(),refresh()]);
+    note('Reward settings saved.');
+  });
+});
 for(const [id,route,payload] of [
   ['profile-form','/api/profile',()=>({name:$('profile-name').value,...($('profile-username').value?{username:$('profile-username').value}:{})})],
   ['appearance-form','/api/profile',()=>({theme:$('theme-select').value})],

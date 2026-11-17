@@ -21,6 +21,78 @@ function fixture(t){
 const phone='+2348012345678',phone2='+2348098765432';
 const report=(d,status,extra={})=>({id:d.id,generation:d.generation,status,...extra});
 
+test('daily claims reset at midnight in Lagos and owner controls are enforced',t=>{
+  const {store,owner,member,clock,advance}=fixture(t);
+  const config={...store.rewardConfig(),dailyEnabled:true,referralEnabled:true,dailyAmount:7};
+  assert.throws(()=>store.updateRewardConfig(member,config),{status:403});
+  assert.equal(store.claimDaily(member),2);
+  assert.throws(()=>store.claimDaily(member),{status:409});
+  const {nextReset}=store.dailyBonus(member);
+  assert.equal(new Date(nextReset).getUTCHours(),23);
+  assert.equal(new Date(nextReset).getUTCMinutes(),0);
+  store.updateRewardConfig(owner,config);
+  advance(nextReset-clock()-1);
+  assert.throws(()=>store.claimDaily(member),{status:409});
+  advance(1);
+  assert.equal(store.claimDaily(member),7);
+  assert.equal(store.user(member).coins,19);
+  assert.deepEqual({...store.ownerData().rewards.daily},{claims:2,paid:9});
+  store.updateRewardConfig(owner,{...config,dailyEnabled:false});
+  assert.throws(()=>store.claimDaily(owner),{status:409});
+});
+
+test('referrals pay once, preserve pending amounts and respect the configured trigger',t=>{
+  const {store,owner,member}=fixture(t);
+  const referral=store.user(member).referral_code;
+  const register=email=>store.register({email,name:'Referred',digest:'test',referral});
+  const user=register('first@example.test');
+  assert.equal(user.coins,10);
+  assert.equal(store.referralStats(member).pending,1);
+  assert.throws(()=>register(memberEmail),{status:409});
+  const changed={...store.rewardConfig(),dailyEnabled:true,referralEnabled:true,
+    inviterAmount:3,inviteeAmount:4,referralTrigger:'signup'};
+  store.updateRewardConfig(owner,changed);
+  const second=register('second@example.test');
+  assert.equal(second.coins,14);
+  assert.equal(store.user(member).coins,13);
+  store.pair(user.id,phone);
+  const bot=store.deployment(user.id);
+  store.sync([report(bot,'online'),report(bot,'online')]);
+  assert.equal(store.user(user.id).coins,5);
+  assert.equal(store.user(member).coins,18);
+  assert.deepEqual({...store.referralStats(member)},{pending:0,completed:2,earned:8});
+  assert.deepEqual({...store.ownerData().rewards.referrals},{pending:0,completed:2,earned:17});
+  store.updateRewardConfig(owner,{...changed,referralEnabled:false});
+  assert.equal(register('third@example.test').coins,10);
+  assert.equal(store.referralStats(member).completed,2);
+});
+
+test('signed-in profile photos are resized, isolated by account and removable',async t=>{
+  const {store,owner,member}=fixture(t);
+  const sharp=require('sharp');
+  const origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>server.close());
+  store.putSession(owner,'photo-owner');
+  store.putSession(member,'photo-member');
+  const addr='http://127.0.0.1:'+server.address().port+'/api/profile/avatar';
+  const request=(token,type,body)=>fetch(addr,{...(body?{method:'POST',body}:{}),
+    headers:{origin,cookie:'raymon='+token,...(type?{'Content-Type':type}:{})}});
+  assert.equal((await request('photo-member','image/png',Buffer.from('not an image'))).status,400);
+  const image=await sharp({create:{width:40,height:60,channels:3,background:'blue'}}).png().toBuffer();
+  const uploaded=await request('photo-member','image/png',image);
+  assert.equal(uploaded.status,200);
+  assert.ok((await uploaded.json()).user.avatarVersion);
+  assert.equal((await request('photo-owner')).status,404);
+  assert.equal((await request('invalid')).status,401);
+  const saved=await request('photo-member');
+  assert.equal(saved.headers.get('content-type'),'image/jpeg');
+  assert.equal((await sharp(Buffer.from(await saved.arrayBuffer())).metadata()).width,256);
+  assert.equal((await request('photo-member','application/json',JSON.stringify({remove:true}))).status,200);
+  assert.equal((await request('photo-member')).status,404);
+});
+
 test('starter coins are granted once and an existing owner cannot be replaced',t=>{
   const {store,owner,member}=fixture(t);
   assert.equal(store.user(member).coins,10);
