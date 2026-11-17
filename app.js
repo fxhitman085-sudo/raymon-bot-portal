@@ -3,7 +3,7 @@ const $=id=>document.getElementById(id);
 const names={queued:'Requesting code',awaiting_code:'Waiting for pairing',connecting:'Connecting',reconnecting:'Reconnecting',online:'Online',paused:'Paused',
   low_balance:'Out of coins',expired:'Code expired',needs_pairing:'Needs pairing',pair_failed:'Pairing failed',suspended:'Suspended'};
 const formatDate=value=>new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-let current,selectedUser,selectedBotId,addingBot=false,botListView,pendingTransfer,ownerOpen=false,refreshing=false,registering=false,recovering=false;
+let current,selectedUser,selectedBotId,addingBot=false,botListView,pendingTransfer,workspaceView='bots',manageOpen=false,refreshing=false,registering=false,recovering=false;
 let resetToken=new URLSearchParams(location.hash.slice(1)).get('reset');
 if(resetToken)history.replaceState(null,'',location.pathname+location.search);
 const note=(message,error=false)=>{
@@ -135,38 +135,64 @@ function draw(data){
   $('landing').hidden=!!user&&!resetToken;
   $('dashboard').hidden=!user||!!resetToken;
   $('sign-out').hidden=!user||!!resetToken;
+  $('sign-in-link').hidden=!!user||!!resetToken;
+  $('site-footer').hidden=!!user&&!resetToken;
+  $('landing-hero').hidden=!!resetToken;
   $('show-recovery').hidden=registering||!data.recoveryAvailable;
   if(!user||resetToken)return;
-  $('greeting').textContent='Hi, '+user.name.split(' ')[0];
+  $('greeting').textContent=user.name;
   $('account-email').textContent=user.email;
   $('view-owner').hidden=!user.isOwner;
   $('password-setup').hidden=!user.needsPassword||user.banned;
-  $('balance').textContent=user.coins;
+  $('balance').textContent=new Intl.NumberFormat().format(user.coins);
   $('add-bot').hidden=user.banned;
-  const listView=JSON.stringify([selectedBotId,addingBot,deployments.map(({id,phone,state,nextRenewal})=>({id,phone,state,nextRenewal}))]);
+  const listView=JSON.stringify([deployments.map(({id,phone,state,nextRenewal})=>({id,phone,state,nextRenewal})),user.banned,data.price]);
   if(listView!==botListView){
     botListView=listView;
     const cards=$('bot-list');
     cards.replaceChildren();
     for(const bot of deployments){
-      const card=element('button',undefined,'bot-card');
-      card.type='button';
-      card.setAttribute('aria-pressed',String(!addingBot&&bot.id===selectedBotId));
-      card.append(element('strong',bot.phone),element('span',names[bot.state]||bot.state),
-        element('small',bot.nextRenewal?'Renews '+formatDate(bot.nextRenewal):'10 coins per 24 hours'));
-      card.addEventListener('click',()=>{
+      const card=element('article',undefined,'deployment');
+      const icon=element('span',undefined,'deployment-icon');
+      icon.setAttribute('aria-hidden','true');
+      const heading=element('h2',bot.phone);
+      const title=element('div',undefined,'deployment-title');
+      const state=user.banned?'suspended':bot.state;
+      const status=element('span',names[state]||state,'bot-status');
+      status.dataset.state=state;
+      title.append(heading,status);
+      const info=element('div',undefined,'deployment-info');
+      info.append(title,element('p',bot.nextRenewal?'Renews '+formatDate(bot.nextRenewal):data.price+' coins per 24 hours'));
+      const manage=element('button','Manage','button subtle');
+      manage.type='button';
+      manage.setAttribute('aria-label','Manage bot '+bot.phone);
+      manage.addEventListener('click',()=>{
         addingBot=false;
         selectedBotId=bot.id;
         $('phone').value='';
         resetSetup();
+        manageOpen=true;
         draw(current);
+        navigateTo('manage-title');
       });
+      card.append(icon,info,manage);
       cards.append(card);
     }
-    if(!deployments.length)cards.append(element('p','No bots deployed yet.','muted'));
+    if(!deployments.length){
+      const empty=element('div',undefined,'empty-state');
+      empty.append(element('h2','No bots yet'),element('p',user.banned?
+        'Your account is suspended. Contact the portal owner.':'Add a WhatsApp number to deploy your first bot.'));
+      cards.append(empty);
+    }
   }
-  $('bot-state').textContent=user.banned?'Suspended':(names[d?.state]||'Not linked');
-  $('bot-phone').textContent=d?.phone||'No WhatsApp number';
+  if(!d&&!addingBot)manageOpen=false;
+  renderNavigation();
+  $('bot-state').textContent=d?(user.banned?'Suspended':(names[d.state]||'Not linked')):'';
+  $('bot-state').hidden=!d;
+  $('bot-state').dataset.state=user.banned?'suspended':d?.state||'';
+  $('manage-title').textContent=addingBot?'Add WhatsApp bot':d?.phone||'Manage bot';
+  $('bot-renewal').hidden=!d?.linked;
+  $('connection-panel').classList.toggle('pairing',!d?.linked);
   $('paid-until').textContent=d?.nextRenewal?formatDate(d.nextRenewal):'—';
   $('renewal-detail').textContent=d?.state==='paused'&&d.paidUntil>Date.now()
     ?'Paused · paid through '+formatDate(d.paidUntil):data.price+' coins per 24 hours';
@@ -178,25 +204,24 @@ function draw(data){
   const pending=!!d?.pairingExpires;
   const canLink=!user.banned&&!d?.linked&&!pending;
   $('pair-form').hidden=!canLink;
-  $('link-art').hidden=!!d?.linked||user.banned;
   drawSettings(data,d);
   if(canLink&&d?.phone&&!$('phone').value)$('phone').value=d.phone;
   $('pair-code-area').hidden=!d?.code;
   $('pair-code').textContent=d?.code||'';
   $('expires').textContent=d?.pairingExpires?'Expires at '+formatDate(d.pairingExpires):'';
   $('bot-actions').hidden=!d?.linked||user.banned;
-  $('cancel-bot').hidden=!d||user.banned;
+  $('bot-access').hidden=!d||user.banned;
   const running=['online','connecting','reconnecting'].includes(d?.state);
   $('pause').hidden=!running;
   $('resume').hidden=running;
   $('resume').disabled=d?.state==='low_balance'&&user.coins<data.price;
   $('connection-title').textContent=d?.linked?'WhatsApp connection':'Link WhatsApp';
   $('connection-info').textContent=user.banned?'Your account is suspended. Contact the portal owner.':
-    d?.state==='low_balance'?'Your paid time ended. Add '+(data.price-user.coins)+' coins or more to resume.':
+    d?.state==='low_balance'?(user.coins<data.price?'Your paid time ended. Add '+(data.price-user.coins)+' coins or more to resume.':'Your paid time ended. Resume the bot to start a new period.'):
     d?.state==='expired'?'The previous code expired. You can request another one.':
     ['needs_pairing','pair_failed'].includes(d?.state)?'WhatsApp could not finish linking. Request a fresh code.':
     d?.state==='reconnecting'?'Trying to reconnect your existing WhatsApp session.':
-    d?.linked?'Pausing stops bot activity. Your paid period continues until its expiry.':
+    d?.linked?'Pausing stops bot activity. Your paid period continues until it expires.':
     pending&&!d.code?'Waiting for WhatsApp to generate a pairing code…':
     pending?'Enter the code below in WhatsApp to finish linking.':'Use a WhatsApp account you control.';
   const details=[];
@@ -222,10 +247,12 @@ async function action(button,callback){
 }
 $('add-bot').addEventListener('click',()=>{
   addingBot=true;
+  manageOpen=true;
   resetSetup();
   $('phone').value='';
   draw(current);
-  $('phone').focus();
+  navigateTo('manage-title');
+  $('phone').focus({preventScroll:true});
 });
 const normalizedPhone=()=>$('phone').value.trim().replace(/[ ()-]/g,'');
 async function requestPair(button,settings){
@@ -347,7 +374,12 @@ for(const command of ['pause','resume','cancel']){
     action(button,async()=>{
       await request('/api/control',{action:command,deploymentId:bot.id});
       draw(await request('/api/me'));
-      if(command==='cancel')note('Bot cancelled.');
+      if(command==='cancel'){
+        manageOpen=false;
+        renderNavigation();
+        navigateTo('bots-heading');
+        note('Bot cancelled.');
+      }
     });
   });
 }
@@ -432,17 +464,50 @@ async function ownerList(){
     fillHistory($('selected-audit'),data.audit);
   }
 }
-function switchView(owner){
-  ownerOpen=owner;
-  $('bot-view').hidden=owner;
-  $('owner-view').hidden=!owner;
-  $('view-bot').classList.toggle('selected',!owner);
-  $('view-owner').classList.toggle('selected',owner);
+function renderNavigation(){
+  if(!current?.user?.isOwner&&workspaceView==='owner')workspaceView='bots';
+  $('bot-view').hidden=workspaceView!=='bots';
+  $('wallet-view').hidden=workspaceView!=='wallet';
+  $('owner-view').hidden=workspaceView!=='owner';
+  $('deployments-view').hidden=manageOpen;
+  $('manage-view').hidden=!manageOpen;
+  for(const [view,id] of [['bots','view-bot'],['wallet','view-wallet'],['owner','view-owner']]){
+    if(workspaceView===view)$(id).setAttribute('aria-current','page');
+    else $(id).removeAttribute('aria-current');
+  }
 }
-$('view-bot').addEventListener('click',()=>switchView(false));
+function navigateTo(id){
+  window.scrollTo(0,0);
+  $(id).focus({preventScroll:true});
+}
+function switchView(view){
+  workspaceView=view;
+  renderNavigation();
+  navigateTo(view==='owner'?'owner-heading':view==='wallet'?'wallet-heading':'bots-heading');
+}
+function showBots(){
+  manageOpen=false;
+  addingBot=false;
+  resetSetup();
+  switchView('bots');
+}
+$('view-bot').addEventListener('click',showBots);
+$('back-to-bots').addEventListener('click',showBots);
+$('view-wallet').addEventListener('click',()=>switchView('wallet'));
 $('view-owner').addEventListener('click',()=>action($('view-owner'),async()=>{
-  await ownerList();switchView(true);
+  await ownerList();switchView('owner');
 }));
+$('deploy-cta').addEventListener('click',()=>{
+  authMode(true);
+  $('account').scrollIntoView({block:'start'});
+  $('auth-name').focus({preventScroll:true});
+});
+$('sign-in-link').addEventListener('click',()=>{
+  if(resetToken)return;
+  recovering=false;
+  authMode(false);
+  authView();
+});
 $('search-form').addEventListener('submit',event=>{
   event.preventDefault();action(event.submitter,ownerList);
 });
@@ -535,4 +600,4 @@ $('set-password-form').addEventListener('submit',event=>{
   });
 });
 refresh().catch(error=>note(error.message,true));
-setInterval(()=>{if(!document.hidden&&current?.user&&!ownerOpen)refresh().catch(()=>{});},2500);
+setInterval(()=>{if(!document.hidden&&current?.user&&workspaceView!=='owner')refresh().catch(()=>{});},2500);
