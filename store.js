@@ -7,6 +7,7 @@ const PAIRING_REPORT_TTL=12_000;
 const LOW_BALANCE_WINDOW=6*60*60_000, RESET_WINDOW=30*60_000;
 const OWNER_EMAIL='abdulganiy346@gmail.com';
 const BAN_MESSAGE='You have been banned. Kindly contact the support team.';
+const LAGOS_OFFSET=3_600_000;
 const hash=value=>createHash('sha256').update(value).digest('hex');
 class PortalError extends Error {
   constructor(status,message){super(message);this.status=status;}
@@ -112,6 +113,22 @@ class Store {
     CREATE TABLE IF NOT EXISTS portal_restart (
       deployment_id TEXT PRIMARY KEY REFERENCES deployments(id), token TEXT NOT NULL, requested INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS portal_avatars (
+      user_id TEXT PRIMARY KEY REFERENCES users(id), version TEXT NOT NULL, jpeg BLOB NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS portal_rewards (
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+      daily_enabled INTEGER NOT NULL, daily_amount INTEGER NOT NULL,
+      referral_enabled INTEGER NOT NULL, inviter_amount INTEGER NOT NULL,
+      invitee_amount INTEGER NOT NULL, referral_trigger TEXT NOT NULL
+    );
+    INSERT OR IGNORE INTO portal_rewards VALUES (1,1,2,1,5,5,'online');
+    CREATE TABLE IF NOT EXISTS portal_referral_rewards (
+      invitee TEXT PRIMARY KEY REFERENCES users(id), inviter TEXT NOT NULL REFERENCES users(id),
+      inviter_amount INTEGER NOT NULL, invitee_amount INTEGER NOT NULL, trigger TEXT NOT NULL,
+      paid_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS portal_referral_rewards_inviter ON portal_referral_rewards(inviter);
     `);
     this.tx(()=>{
       for(const user of this.all('SELECT id FROM users WHERE id NOT IN (SELECT user_id FROM portal_profiles)')){
@@ -201,6 +218,7 @@ class Store {
       this.run('INSERT INTO passwords VALUES (?,?,?)',email,id,digest);
       if(!priorOwner){
         this.createProfile(id,username,referral);
+        this.recordReferral(id);
         this.event(id,null,'Welcome to RAYMON BOT','Your account received 10 starter coins. Deploy a bot to get started.');
       }else if(username)this.updateUsername(id,username);
       return this.user(id);
@@ -223,6 +241,71 @@ class Store {
     this.run('INSERT INTO portal_profiles (user_id,referral_code,referred_by) VALUES (?,?,?)',
       id,hash('raymon-referral:'+id).slice(0,16),ref?.user_id||null);
     if(username)this.updateUsername(id,username);
+  }
+  rewardConfig(){
+    return this.get(`SELECT daily_enabled AS dailyEnabled,daily_amount AS dailyAmount,
+      referral_enabled AS referralEnabled,inviter_amount AS inviterAmount,invitee_amount AS inviteeAmount,
+      referral_trigger AS referralTrigger FROM portal_rewards WHERE singleton=1`);
+  }
+  updateRewardConfig(id,data){
+    return this.tx(()=>{
+      if(!this.requireActive(id).is_owner)throw new PortalError(403,'Owner access required.');
+      const {dailyEnabled,dailyAmount,referralEnabled,inviterAmount,inviteeAmount,referralTrigger}=data||{};
+      if(typeof dailyEnabled!=='boolean'||typeof referralEnabled!=='boolean'||
+        ![dailyAmount,inviterAmount,inviteeAmount].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=100_000)||
+        dailyEnabled&&dailyAmount===0||referralEnabled&&inviterAmount+inviteeAmount===0||
+        !['online','signup'].includes(referralTrigger))throw new PortalError(400,'Check the reward amounts and payout settings.');
+      this.run('UPDATE portal_rewards SET daily_enabled=?,daily_amount=?,referral_enabled=?,inviter_amount=?,invitee_amount=?,referral_trigger=? WHERE singleton=1',
+        Number(dailyEnabled),dailyAmount,Number(referralEnabled),inviterAmount,inviteeAmount,referralTrigger);
+    });
+  }
+  dailyBonus(id,now=this.clock(),settings=this.rewardConfig()){
+    const day=Math.floor((now+LAGOS_OFFSET)/DAY);
+    const claimId='daily:'+id+':'+day;
+    return {claimId,enabled:!!settings.dailyEnabled,amount:settings.dailyAmount,
+      claimed:!!this.get('SELECT 1 FROM ledger WHERE id=?',claimId),nextReset:(day+1)*DAY-LAGOS_OFFSET};
+  }
+  claimDaily(id){
+    return this.tx(()=>{
+      this.requireActive(id);
+      const bonus=this.dailyBonus(id);
+      if(!bonus.enabled)throw new PortalError(409,'Daily bonus is currently turned off.');
+      if(bonus.claimed)throw new PortalError(409,'You already claimed today’s bonus.');
+      this.credit(id,bonus.amount,'daily_bonus','Daily bonus',null,bonus.claimId);
+      return bonus.amount;
+    });
+  }
+  recordReferral(invitee){
+    const settings=this.rewardConfig();
+    if(!settings.referralEnabled)return;
+    const inviter=this.get('SELECT referred_by FROM portal_profiles WHERE user_id=?',invitee)?.referred_by;
+    if(!inviter||inviter===invitee||this.user(inviter)?.banned)return;
+    this.run('INSERT INTO portal_referral_rewards VALUES (?,?,?,?,?,NULL)',
+      invitee,inviter,settings.inviterAmount,settings.inviteeAmount,settings.referralTrigger);
+    if(settings.referralTrigger==='signup')this.payReferral(invitee,'signup');
+  }
+  payReferral(invitee,trigger){
+    const reward=this.get('SELECT * FROM portal_referral_rewards WHERE invitee=? AND trigger=? AND paid_at IS NULL',invitee,trigger);
+    if(!reward||!this.rewardConfig().referralEnabled)return;
+    const inviter=this.user(reward.inviter);
+    if(!inviter||inviter.banned||inviter.closed_at)return;
+    if(reward.inviter_amount)this.credit(reward.inviter,reward.inviter_amount,'referral_inviter','Referral reward',null,'referral-inviter:'+invitee);
+    if(reward.invitee_amount)this.credit(invitee,reward.invitee_amount,'referral_invitee','Welcome referral bonus',null,'referral-invitee:'+invitee);
+    this.run('UPDATE portal_referral_rewards SET paid_at=? WHERE invitee=?',this.clock(),invitee);
+  }
+  referralStats(inviter=null){
+    const filter=inviter===null?'':' WHERE inviter=?';
+    const amount=inviter===null?'inviter_amount+invitee_amount':'inviter_amount';
+    return this.get(`SELECT count(*) FILTER (WHERE paid_at IS NULL) AS pending,
+      count(paid_at) AS completed,coalesce(sum(${amount}) FILTER (WHERE paid_at IS NOT NULL),0) AS earned
+      FROM portal_referral_rewards${filter}`,...(inviter===null?[]:[inviter]));
+  }
+  avatar(id){return this.get('SELECT version,jpeg FROM portal_avatars WHERE user_id=?',id);}
+  setAvatar(id,jpeg){
+    this.requireActive(id);
+    if(!jpeg)this.run('DELETE FROM portal_avatars WHERE user_id=?',id);
+    else this.run(`INSERT INTO portal_avatars VALUES (?,?,?) ON CONFLICT(user_id)
+      DO UPDATE SET version=excluded.version,jpeg=excluded.jpeg`,id,randomUUID(),jpeg);
   }
   updateUsername(id,username){
     const other=this.get('SELECT user_id FROM portal_profiles WHERE username=?',username);
@@ -259,6 +342,7 @@ class Store {
       if(saved?.user_id!==id||saved.digest!==oldDigest)throw new PortalError(409,'Your credentials changed. Try again.');
       for(const bot of this.deployments(id))this.cancel(bot);
       this.run('UPDATE portal_profiles SET closed_at=? WHERE user_id=?',this.clock(),id);
+      this.run('DELETE FROM portal_avatars WHERE user_id=?',id);
       this.run('UPDATE users SET banned=1 WHERE id=?',id);
       this.run('DELETE FROM sessions WHERE user_id=?',id);
       this.run('DELETE FROM password_resets WHERE email=?',email);
@@ -511,6 +595,9 @@ class Store {
   }
   dashboard(user){
     const now=this.clock();
+    const rewards=this.rewardConfig();
+    const {claimId,...dailyBonus}=this.dailyBonus(user.id,now,rewards);
+    const ownReferral=this.get('SELECT invitee_amount AS amount,paid_at AS paidAt FROM portal_referral_rewards WHERE invitee=?',user.id);
     const deployments=this.deployments(user.id).map(d=>{
       const code=this.codes.get(d.id);
       return {id:d.id,phone:d.phone,requested:d.requested||null,state:this.state(d,user,now),linked:!!d.linked,settings:this.settingsView(d.id),paidUntil:d.paid_until||null,
@@ -528,8 +615,12 @@ class Store {
       (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,user.id,now,now,PRICE);
     return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
       username:user.username,theme:user.theme||'dark',created:user.created,referralCode:user.referral_code,
+      avatarVersion:this.get('SELECT version FROM portal_avatars WHERE user_id=?',user.id)?.version||null,
       banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},capacity:{used,accountUsed,total:this.maxBots},
       unread:this.notices(user).filter(row=>!row.read).length,workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
+      dailyBonus,referralProgram:{enabled:!!rewards.referralEnabled,inviterAmount:rewards.inviterAmount,
+        inviteeAmount:rewards.inviteeAmount,trigger:rewards.referralTrigger,
+        ownBonus:ownReferral||null,...this.referralStats(user.id)},
       deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
@@ -546,7 +637,9 @@ class Store {
       (SELECT count(*) FROM deployments WHERE state<>'cancelled') AS deployments,
       (SELECT count(*) FROM deployments WHERE state='online' AND last_seen>?) AS online,
       (SELECT count(*) FROM ledger WHERE kind='uptime') AS charges`,this.clock()-12_000);
-    return {stats,users,deployments,history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
+    const daily=this.get("SELECT count(*) AS claims,coalesce(sum(delta),0) AS paid FROM ledger WHERE kind='daily_bonus'");
+    return {stats,users,deployments,rewards:{settings:this.rewardConfig(),daily,referrals:this.referralStats()},
+      history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
   }
   sync(reports){
     const now=this.clock();
@@ -628,6 +721,7 @@ class Store {
         paidUntil=now+DAY;
       }
       this.run("UPDATE deployments SET intent='run',state='online',linked=1,paid_until=?,pair_until=0,last_seen=? WHERE id=?",paidUntil,now,d.id);
+      if(paidUntil>now)this.payReferral(d.user_id,'online');
     }
   }
 }

@@ -253,6 +253,7 @@ td .small { display:block; overflow-wrap:anywhere; }
 .avatar { display:inline-grid;place-items:center;width:58px;height:58px;border:1px solid #23468b;
   border-radius:50%;background:var(--raised);color:var(--text);font:750 1.15rem/1.1 Inter,system-ui,sans-serif; }
 .avatar-small { width:40px;height:40px;font-size:.86rem;cursor:pointer; }
+.avatar img { width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block; }
 #notifications-button { position:relative; }
 #unread-count { position:absolute;top:0;right:0;min-width:19px;min-height:19px;padding:1px 4px;
   color:white;background:#1d4ed8;border-radius:20px;font-size:.68rem;font-weight:800; }
@@ -336,6 +337,10 @@ progress::-moz-progress-bar { background:#1d4ed8; }
 .danger-panel p { margin-top:8px;color:var(--muted); }
 .button.danger { background:#92261f;color:white; }
 .admin-announcements { margin:12px 0; }
+#rewards-form fieldset { min-width:0;margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px; }
+#rewards-form .reward-toggle { display:flex;align-items:center;gap:8px; }
+#rewards-form .reward-toggle input { width:auto;min-height:0;accent-color:#1d4ed8; }
+#avatar-form .actions { margin:10px 0 16px; }
 
 .support-button { position:fixed;z-index:3;bottom:calc(19px + env(safe-area-inset-bottom));right:18px;width:48px;height:48px;
   color:white;background:#123d91;border-color:#2563eb;box-shadow:0 7px 20px #123d9155; }

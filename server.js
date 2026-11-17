@@ -4,6 +4,7 @@ const path=require('node:path');
 const {randomBytes,scrypt,timingSafeEqual}=require('node:crypto');
 const {promisify}=require('node:util');
 const {isIP}=require('node:net');
+const sharp=require('sharp');
 const {Store,PortalError,OWNER_EMAIL,BAN_MESSAGE}=require('./store');
 const {startWorker}=require('./worker');
 const derive=promisify(scrypt);
@@ -79,15 +80,27 @@ async function digest(password,salt=randomBytes(16).toString('hex')){
   const key=await derive(password,Buffer.from(salt,'hex'),64,kdf);
   return salt+':'+key.toString('hex');
 }
-async function body(req,limit=32768){
-  if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))throw new PortalError(415,'Expected JSON.');
+async function readBody(req,limit){
   const parts=[];let size=0;
   for await(const part of req){
     size+=part.length;
     if(size>limit)throw new PortalError(413,'Request too large.');
     parts.push(part);
   }
-  try{return JSON.parse(Buffer.concat(parts));}catch{throw new PortalError(400,'Invalid JSON.');}
+  return Buffer.concat(parts);
+}
+async function body(req,limit=32768){
+  if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))throw new PortalError(415,'Expected JSON.');
+  const raw=await readBody(req,limit);
+  try{return JSON.parse(raw);}catch{throw new PortalError(400,'Invalid JSON.');}
+}
+async function avatarJpeg(bytes){
+  try{
+    const image=sharp(bytes,{limitInputPixels:20_000_000});
+    const {format,pages}=await image.metadata();
+    if(!['jpeg','png','webp'].includes(format)||pages>1)throw Error('Unsupported image');
+    return await image.autoOrient().resize(256,256,{fit:'cover'}).flatten({background:'#ffffff'}).jpeg({quality:84}).toBuffer();
+  }catch{throw new PortalError(400,'Choose a valid JPG, PNG, or WebP photo under 3 MB.');}
 }
 
 function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=false,sendMail=null,links={}}){
@@ -264,6 +277,28 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
           (data?.theme!==undefined&&!['dark','light'].includes(data.theme)))throw new PortalError(400,'Check your profile fields.');
         return json(res,200,store.dashboard(store.updateProfile(user.id,{username,name,theme:data?.theme})));
       }
+      if(route==='/api/profile/avatar'){
+        if(method==='GET'){
+          const photo=store.avatar(user.id);
+          if(!photo)throw new PortalError(404,'No profile photo.');
+          res.writeHead(200,{'Content-Type':'image/jpeg'});
+          return res.end(photo.jpeg);
+        }
+        if(method==='POST'){
+          rateLimit(req,user.id,'profile-avatar');
+          const type=req.headers['content-type'];
+          const jpeg=type==='application/json'
+            ?((await body(req))?.remove===true?null:undefined)
+            :await avatarJpeg(await readBody(req,3*1024*1024));
+          if(jpeg===undefined)throw new PortalError(400,'Choose a photo or remove the current one.');
+          store.setAvatar(user.id,jpeg);
+          return json(res,200,store.dashboard(store.user(user.id)));
+        }
+      }
+      if(method==='POST'&&route==='/api/rewards/daily'){
+        const amount=store.claimDaily(user.id);
+        return json(res,200,{...store.dashboard(store.user(user.id)),claimedAmount:amount});
+      }
       if(method==='POST'&&route==='/api/auth/change-password'){
         const data=await body(req);
         const password=newPassword(data?.password);
@@ -316,6 +351,11 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       if(route==='/api/owner'&&method==='GET'){
         if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');
         return json(res,200,store.ownerData(url.searchParams.get('search')||'',url.searchParams.get('user')||undefined));
+      }
+      if(route==='/api/owner/rewards'&&method==='POST'){
+        if(!user.is_owner)throw new PortalError(403,'Owner access required.');
+        store.updateRewardConfig(user.id,await body(req));
+        return json(res,200,{ok:true});
       }
       if(route==='/api/owner'&&method==='POST'){
         if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');

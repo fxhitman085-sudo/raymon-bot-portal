@@ -134,7 +134,8 @@
         </div>
         <p id="dashboard-low-balance" class="notice" role="status" hidden></p>
         <article id="dashboard-empty" class="panel empty-dashboard"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 13h.01M15 13h.01M9 17h6M2 11v5m20-5v5"/></svg><h2>No Bots Deployed Yet</h2><p>Your hosting journey starts here. Deploy your first WhatsApp bot in minutes.</p><button id="first-deploy" class="button primary" type="button">Deploy Your First Bot</button></article>
-        <article class="panel referral-panel"><h2>Referral Program</h2><p class="muted">Share your invitation link.</p><div class="copy-row"><input id="home-referral" aria-label="Referral link" readonly><button class="button subtle copy-referral" type="button">Copy</button></div></article>
+        <article class="panel referral-panel"><h2>Daily Bonus</h2><p id="daily-bonus-status" class="muted" aria-live="polite"></p><button id="claim-daily" class="button primary" type="button" hidden>Claim Daily Bonus</button></article>
+        <article class="panel referral-panel"><h2>Referral Program</h2><p id="referral-reward" class="muted"></p><div class="copy-row"><input id="home-referral" aria-label="Referral link" readonly><button class="button subtle copy-referral" type="button">Copy</button></div><p id="referral-stats" class="small"></p><p id="referral-welcome" class="small" hidden></p></article>
       </section>
       <div id="bot-view">
         <section id="deployments-view" aria-labelledby="bots-heading">
@@ -263,6 +264,8 @@
           <button class="button" data-profile-tab="danger" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg><span>Danger Zone</span></button>
         </nav>
         <article id="profile-information" class="panel profile-panel"><h2>Profile Information</h2>
+          <form id="avatar-form"><label for="avatar-file">Profile photo</label><input id="avatar-file" type="file" accept="image/jpeg,image/png,image/webp" required>
+          <div class="actions"><button class="button subtle" type="submit">Upload Photo</button><button id="remove-avatar" class="button subtle" type="button" hidden>Remove Photo</button></div></form>
           <form id="profile-form"><label for="profile-name">Display Name</label><input id="profile-name" autocomplete="name" maxlength="90" required>
           <label for="profile-username">Username</label><input id="profile-username" autocomplete="username" maxlength="24" pattern="[A-Za-z0-9_]{3,24}">
           <label for="profile-address">Email</label><input id="profile-address" readonly>
@@ -285,6 +288,23 @@
         <div class="owner-head"><h1 id="owner-heading" tabindex="-1">Manage accounts</h1>
         <form id="search-form"><label for="search">Search users</label><div class="actions"><input id="search" placeholder="Name, email or number" maxlength="100"><button class="button subtle">Search</button></div></form></div>
         <p id="platform-stats" class="small"></p>
+        <details class="panel admin-announcements"><summary>Daily Bonus and Referral Program</summary>
+          <form id="rewards-form">
+            <fieldset><legend>Daily Bonus</legend>
+              <label class="reward-toggle"><input id="daily-enabled" type="checkbox"> Enable daily bonus</label>
+              <label for="daily-amount">Coins per daily claim</label><input id="daily-amount" type="number" min="0" max="100000" step="1" required>
+              <p id="owner-daily-stats" class="small"></p>
+            </fieldset>
+            <fieldset><legend>Referral Program</legend>
+              <label class="reward-toggle"><input id="referral-enabled" type="checkbox"> Enable referral rewards</label>
+              <label for="inviter-amount">Coins for the inviter</label><input id="inviter-amount" type="number" min="0" max="100000" step="1" required>
+              <label for="invitee-amount">Coins for the new user</label><input id="invitee-amount" type="number" min="0" max="100000" step="1" required>
+              <label for="referral-trigger">Pay referral rewards</label><select id="referral-trigger"><option value="online">When the first bot goes online</option><option value="signup">At signup</option></select>
+              <p id="owner-referral-stats" class="small"></p>
+            </fieldset>
+            <button class="button primary" type="submit">Save Reward Settings</button>
+          </form>
+        </details>
         <details class="panel admin-announcements"><summary>Publish an announcement</summary><form id="announcement-form">
           <label for="announcement-title">Title</label><input id="announcement-title" required maxlength="90">
           <label for="announcement-body">Announcement</label><textarea id="announcement-body" required maxlength="1600" rows="4"></textarea>
