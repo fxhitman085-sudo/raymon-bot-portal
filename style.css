@@ -428,3 +428,25 @@ progress::-moz-progress-bar { background:#1d4ed8; }
 @media (max-width: 480px) {
   .v3-fields,.v3-permissions { grid-template-columns:minmax(0,1fr); gap:3px; }
 }
+
+.payment-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-bottom:18px; align-items:start; }
+.payment-bank { padding:14px; border:1px solid var(--line); border-radius:10px; }
+.payment-bank>div { display:flex; justify-content:space-between; flex-wrap:wrap; gap:5px 16px; margin:5px 0; }
+.payment-bank dt { color:var(--muted); }
+.payment-bank dd { margin:0; font-weight:650; font-variant-numeric:tabular-nums; }
+.payment-packages { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:20px; padding:0; border:0; }
+.payment-packages legend { margin-bottom:10px; font-weight:600; }
+.payment-packages label { margin:0; padding:10px 8px; display:flex; gap:6px; align-items:center; border:1px solid var(--line); border-radius:9px; cursor:pointer; font-size:.85rem; }
+.payment-packages label:has(:checked) { border-color:#2563eb; background:var(--surface-raised,var(--surface)); }
+.payment-packages input { width:16px; height:16px; margin:0; accent-color:#1d4ed8; flex-shrink:0; }
+.payment-packages strong,.payment-packages small { display:block; }
+.payment-packages small { color:var(--muted); }
+.payment-record { display:grid; gap:9px; }
+.payment-record h3 { margin:0; }
+.payment-record .button { justify-self:start; }
+.payment-status { color:var(--muted); font-size:.8rem; font-weight:650; }
+.payment-status[data-status="approved"] { color:var(--success,#21834b); }
+.payment-status[data-status="rejected"] { color:var(--danger,#dc2626); }
+#payment-form .button,#payment-form textarea { margin-top:10px; }
+@media(max-width:1000px) { .payment-layout { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:380px) { .payment-packages label { padding:9px 5px; gap:4px; } }

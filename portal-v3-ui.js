@@ -13,13 +13,14 @@ function renderV3Access(user){
   const roleKey=JSON.stringify([user.email,user.staff]);
   if(roleKey!==previousRole){
     selectedUser=null;
-    for(const id of ['staff-inbox','staff-promos','staff-referrals','founder-staff','founder-audit','users','selected-bots','selected-history','selected-audit'])
+    for(const id of ['staff-inbox','staff-promos','staff-referrals','founder-staff','founder-audit','founder-payments','payment-history','users','selected-bots','selected-history','selected-audit'])
       $(id).replaceChildren();
-    for(const id of ['staff-inbox-panel','staff-promos-panel','staff-referrals-panel','founder-staff-panel','founder-audit-panel'])
+    for(const id of ['staff-inbox-panel','staff-promos-panel','staff-referrals-panel','founder-staff-panel','founder-audit-panel','founder-payments-panel'])
       $(id).open=false;
     $('admin-detail').hidden=true;
     previousRole=roleKey;
   }
+  $('founder-payments-panel').hidden=!user.isOwner;
   $('view-owner').hidden=!canAdmin();
   $('view-owner').lastChild.textContent=user.isOwner?'Founder Dashboard':'Admin Dashboard';
   $('owner-heading').textContent=user.isOwner?'Founder Dashboard':'Adm Lvl '+user.staff?.level+' Dashboard';
@@ -516,4 +517,116 @@ $('guide-jump').addEventListener('click',()=>{
   if(view==='bots')showBots();
   else if(view==='deploy')beginDeployment();
   else switchView(view);
+});
+
+let pendingPayment=null,paymentAccount='';
+const paymentLoads={mine:0,review:0};
+function paymentListRow(payment,review){
+  const card=element('article',undefined,'v3-record payment-record');
+  card.append(element('h3',payment.coins+' coins · ₦'+numberFormat.format(payment.naira)));
+  const state=element('span',payment.status[0].toUpperCase()+payment.status.slice(1),'payment-status');
+  state.dataset.status=payment.status;
+  card.append(state,element('p',payment.reference,'small'),element('time',formatDate(payment.created),'small'));
+  if(review)card.append(element('p',payment.name+' · '+payment.email,'small'));
+  if(payment.reason)card.append(element('p',payment.reason,'v3-copy'));
+  if(payment.reviewed)card.append(element('p','Reviewed '+formatDate(payment.reviewed),'small'));
+  const attachment=element('a','View payment screenshot','button subtle');
+  Object.assign(attachment,{
+    href:v3Path('payments',{attachment:payment.id,...(review?{review:1}:{})}),
+    target:'_blank',rel:'noopener noreferrer'
+  });
+  card.append(attachment);
+  if(review&&payment.status==='pending'){
+    const form=element('form');
+    const decision=element('select');
+    decision.append(new Option('Approve payment','approved'),new Option('Reject payment','rejected'));
+    v3Field(form,'Decision',decision);
+    const reason=v3Field(form,'Review note (required when rejecting)',Object.assign(element('textarea'),{maxLength:500,rows:2}));
+    decision.addEventListener('change',()=>{reason.required=decision.value==='rejected';});
+    const hint=element('p','Check that the transfer reached your OPay account before approving.','small');
+    form.append(hint);
+    v3Submit(form,'Confirm review',async()=>{
+      if(!window.confirm(decision.value==='approved'?
+        'Confirm you received ₦'+numberFormat.format(payment.naira)+' and credit '+payment.coins+' coins?':
+        'Reject this payment request?'))return;
+      await request(v3Path('payments'),{action:'review',paymentId:payment.id,decision:decision.value,reason:reason.value});
+      await loadPayments(true);
+      await refresh();
+      note('Payment '+decision.value+'.');
+    });
+    card.append(form);
+  }
+  return card;
+}
+async function loadPayments(review=false,before=null){
+  const host=$(review?'founder-payments':'payment-history');
+  const scope=review?'review':'mine';
+  const version=++paymentLoads[scope],account=current?.user?.email;
+  if(!account)return;
+  if(!before)v3Text(host,'Loading payments…');
+  try{
+    const data=await request(v3Path('payments',{...(review?{review:1}:{}),...(before?{before}:{})}));
+    if(version!==paymentLoads[scope]||current?.user?.email!==account)return;
+    if(!before){
+      host.replaceChildren();
+      if(review)host.append(v3Button('Refresh payments',()=>loadPayments(true)));
+    }
+    host.querySelector(':scope > .v3-more')?.remove();
+    if(!data.items.length&&!before)host.append(element('p',review?'No payment requests yet.':'Your payment requests will appear here.','muted'));
+    for(const payment of data.items)host.append(paymentListRow(payment,review));
+    if(data.more){
+      const button=v3Button('Load more payments',()=>loadPayments(review,data.items.at(-1).id));
+      button.classList.add('v3-more');
+      host.append(button);
+    }
+  }catch(error){
+    if(version===paymentLoads[scope]&&!before)v3Text(host,error.message);
+    throw error;
+  }
+}
+for(const id of ['view-buy','wallet-buy'])$(id).addEventListener('click',()=>action($(id),async()=>{
+  if(paymentAccount!==current?.user?.email){
+    pendingPayment=null;
+    $('payment-form').reset();
+    paymentAccount=current?.user?.email||'';
+    showPaymentTotal();
+  }
+  await loadPayments();
+}));
+$('refresh-payments').addEventListener('click',()=>action($('refresh-payments'),()=>loadPayments()));
+bindPanel('founder-payments-panel',()=>loadPayments(true));
+function showPaymentTotal(){
+  const selected=$('payment-form').querySelector('input[name="coin-package"]:checked').value;
+  setValue('payment-total','Transfer ₦'+numberFormat.format(Number(selected)*10)+' for '+selected+' coins.');
+}
+for(const field of $('payment-form').querySelectorAll('input'))field.addEventListener('change',()=>{
+  pendingPayment=null;
+  showPaymentTotal();
+});
+$('copy-payment-account').addEventListener('click',()=>action($('copy-payment-account'),async()=>{
+  await navigator.clipboard.writeText('8059692394');
+  note('Account number copied.');
+}));
+$('payment-form').addEventListener('submit',event=>{
+  event.preventDefault();
+  const form=event.currentTarget;
+  action(event.submitter,async()=>{
+    const account=current?.user?.email;
+    const screenshot=await screenshotValue($('payment-screenshot'));
+    if(!screenshot)throw Error('Upload a payment screenshot.');
+    const payload={
+      action:'submit',packageId:form.querySelector('input[name="coin-package"]:checked').value,
+      reference:$('payment-reference').value.trim(),screenshot
+    };
+    if(!pendingPayment||pendingPayment.account!==account||
+      pendingPayment.packageId!==payload.packageId||pendingPayment.reference!==payload.reference||
+      pendingPayment.screenshot!==payload.screenshot)
+      pendingPayment={...payload,account,requestId:crypto.randomUUID()};
+    const result=await request(v3Path('payments'),pendingPayment);
+    pendingPayment=null;
+    form.reset();
+    showPaymentTotal();
+    await loadPayments();
+    note(result.status==='pending'?'Payment evidence submitted. Awaiting review.':'This payment has already been reviewed.');
+  });
 });

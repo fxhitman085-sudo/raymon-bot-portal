@@ -22,6 +22,11 @@ const ADMIN_ACTIONS={grant:'coins.adjust',remove:'coins.adjust',ban:'users.moder
   pause:'deployments.manage',cancel:'deployments.manage'};
 const PERIODS=['daily','weekly','monthly','all'];
 const DAY=86_400_000, OFFSET=3_600_000;
+const COIN_PACKAGES=[
+  {id:'50',naira:500,coins:50},
+  {id:'100',naira:1000,coins:100},
+  {id:'200',naira:2000,coins:200}
+];
 const digest=value=>createHash('sha256').update(value).digest('hex');
 function periodWindow(period,now,previous=0){
   if(period==='all')return [0,0];
@@ -45,6 +50,17 @@ class PortalV3 {
     this.s=store;
     this.Error=ErrorType;
     store.tx(()=>store.db.exec(`
+      CREATE TABLE IF NOT EXISTS v3_payments (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+        package_id TEXT NOT NULL, naira INTEGER NOT NULL, coins INTEGER NOT NULL,
+        reference TEXT NOT NULL, reference_key TEXT UNIQUE NOT NULL,
+        screenshot BLOB NOT NULL, screenshot_hash TEXT UNIQUE NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+        reason TEXT NOT NULL DEFAULT '', reviewer TEXT REFERENCES users(id),
+        created INTEGER NOT NULL, reviewed INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS v3_payments_user ON v3_payments(user_id,created DESC);
+      CREATE INDEX IF NOT EXISTS v3_payments_status ON v3_payments(status,created);
       CREATE TABLE IF NOT EXISTS v3_migrations (name TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS v3_admins (
         user_id TEXT PRIMARY KEY REFERENCES users(id), level INTEGER NOT NULL CHECK(level BETWEEN 1 AND 7),
@@ -274,6 +290,90 @@ class PortalV3 {
       this.s.run('UPDATE v3_tickets SET updated=? WHERE id=?',now,ticket.id);
       if(staff)this.audit(id,'ticket.'+action,ticket.id,action==='assign'?(assignee||'Unassigned'):ticket.subject);
       return {id:ticket.id};
+    });
+  }
+  paymentRows(id,review,before){
+    if(review)this.permit(id,'founder');
+    else this.s.requireActive(id);
+    const rows=this.s.all(`SELECT p.id,p.package_id AS packageId,p.naira,p.coins,p.reference,p.status,
+      p.reason,p.created,p.reviewed,u.name,u.email
+      FROM v3_payments p JOIN users u ON u.id=p.user_id
+      WHERE (? OR p.user_id=?) AND p.rowid<COALESCE((SELECT rowid FROM v3_payments WHERE id=?),9223372036854775807)
+      ORDER BY p.rowid DESC LIMIT 51`,Number(review),id,before||'');
+    return {
+      bank:'OPay',accountNumber:'8059692394',packages:COIN_PACKAGES,
+      items:rows.slice(0,50).map(row=>{
+        if(review)return row;
+        const {name,email,...payment}=row;
+        return payment;
+      }),
+      more:rows.length>50
+    };
+  }
+  payment(id,paymentId,review){
+    if(review)this.permit(id,'founder');
+    else this.s.requireActive(id);
+    const payment=this.s.get('SELECT * FROM v3_payments WHERE id=? AND (? OR user_id=?)',
+      paymentId,Number(review),id);
+    if(!payment)this.fail(404,'Payment request not found.');
+    return payment;
+  }
+  submitPayment(id,{requestId,packageId,reference}={},screenshot){
+    return this.s.tx(()=>{
+      this.s.requireActive(id);
+      const selected=COIN_PACKAGES.find(row=>row.id===packageId);
+      const text=typeof reference==='string'?reference.trim():'';
+      const key=text.replace(/[^a-z0-9]/gi,'').toUpperCase();
+      if(typeof requestId!=='string'||!/^[a-f0-9-]{36}$/.test(requestId)||!selected||
+        !text||text.length>120||key.length<6||!Buffer.isBuffer(screenshot)||!screenshot.length)
+        this.fail(400,'Choose a coin package, enter the bank transaction reference, and upload a payment screenshot.');
+      const screenshotHash=createHash('sha256').update(screenshot).digest('hex');
+      const prior=this.s.get('SELECT * FROM v3_payments WHERE id=?',requestId);
+      if(prior){
+        if(prior.user_id!==id||prior.package_id!==packageId||prior.reference_key!==key||prior.screenshot_hash!==screenshotHash)
+          this.fail(409,'This request has already been used. Refresh your payment history.');
+        return {id:prior.id,status:prior.status};
+      }
+      if(this.s.get('SELECT 1 FROM v3_payments WHERE reference_key=? OR screenshot_hash=?',key,screenshotHash))
+        this.fail(409,'This transaction reference or payment screenshot has already been submitted.');
+      if(this.s.get("SELECT count(*) AS n FROM v3_payments WHERE user_id=? AND status='pending'",id).n>=5)
+        this.fail(409,'You already have five payments awaiting review.');
+      const used=this.s.get('SELECT COALESCE(sum(length(screenshot)),0) AS bytes FROM v3_payments').bytes;
+      if(used+screenshot.length>100*1024*1024)
+        this.fail(409,'Receipt storage is full. Contact support for help with your payment.');
+      this.s.run(`INSERT INTO v3_payments
+        (id,user_id,package_id,naira,coins,reference,reference_key,screenshot,screenshot_hash,created)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        requestId,id,selected.id,selected.naira,selected.coins,text,key,screenshot,screenshotHash,this.s.clock());
+      const founder=this.s.get('SELECT user_id FROM owner WHERE singleton=1')?.user_id;
+      if(founder)this.s.event(founder,null,'New coin payment to review',
+        'A '+selected.naira+' naira payment request is waiting in Founder Dashboard → Coin Payments.');
+      return {id:requestId,status:'pending'};
+    });
+  }
+  reviewPayment(id,{paymentId,decision,reason}={}){
+    return this.s.tx(()=>{
+      this.permit(id,'founder');
+      if(typeof paymentId!=='string'||!['approved','rejected'].includes(decision))
+        this.fail(400,'Select a payment and review decision.');
+      const payment=this.payment(id,paymentId,true);
+      if(payment.status!=='pending'){
+        if(payment.status===decision)return {status:payment.status};
+        this.fail(409,'This payment has already been reviewed.');
+      }
+      const message=typeof reason==='string'?reason.trim():'';
+      if(message.length>500||decision==='rejected'&&!message)
+        this.fail(400,'Enter a rejection reason of up to 500 characters.');
+      if(decision==='approved'){
+        this.s.credit(payment.user_id,payment.coins,'coin_purchase',
+          'Bank transfer purchase · '+payment.reference,id,'payment:'+payment.id);
+      }
+      this.s.run('UPDATE v3_payments SET status=?,reason=?,reviewer=?,reviewed=? WHERE id=?',
+        decision,message,id,this.s.clock(),payment.id);
+      this.s.event(payment.user_id,null,decision==='approved'?'Coin payment approved':'Coin payment rejected',
+        decision==='approved'?payment.coins+' coins were added to your balance.':message);
+      this.audit(id,'payment.'+decision,payment.id,payment.coins+' coins · '+payment.reference+(message?' · '+message:''));
+      return {status:decision};
     });
   }
   promos(id,promo,before,claimBefore=null){

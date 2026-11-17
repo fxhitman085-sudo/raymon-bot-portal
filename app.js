@@ -947,17 +947,6 @@ $('view-community').addEventListener('click',async()=>{
     drawEvents('community-feed',announcements,'No announcements yet.');
   }catch(error){setValue('community-feed',error.message);}
 });
-for(const id of ['support-button','community-support'])$(id).addEventListener('click',async()=>{
-  openDialog('support-dialog');
-  $('support-inbox-button').hidden=!current?.user;
-  setValue('support-message','Checking support options…');
-  $('support-link').hidden=true;
-  try{
-    const {support}=await request('/api/community');
-    setValue('support-message',support||current?.user?'Get help with your account or bot deployment.':'Sign in to open a support ticket.');
-    if(support){$('support-link').href=support;$('support-link').hidden=false;}
-  }catch(error){setValue('support-message',error.message);}
-});
 $('announcement-form').addEventListener('submit',event=>{
   event.preventDefault();
   action(event.submitter,async()=>{

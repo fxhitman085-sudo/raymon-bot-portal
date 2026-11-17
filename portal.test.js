@@ -803,3 +803,101 @@ test('Version 3 migrations preserve a Founder, balances, sessions and linked dep
   store.v3.saveOnboarding(member,0);
   assert.equal(store.v3.onboarding(member),0);
 });
+
+test('coin payment packages are server priced, receipts are private and approval credits once',async t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'payment-other@example.com',name:'Other',digest:'test'}).id;
+  store.putSession(owner,'payment-owner');
+  store.putSession(member,'payment-member');
+  store.putSession(other,'payment-other');
+  store.v3.setStaff(owner,{userId:other,action:'level',level:7});
+  store.v3.setPermissions(owner,{level:7,permissions:['coins.adjust','coins.view']});
+  const origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const root='http://127.0.0.1:'+server.address().port;
+  const request=(route,session,data,source=origin)=>fetch(root+route,{
+    method:data?'POST':'GET',headers:{origin:source,'Content-Type':'application/json',...(session?{cookie:'raymon='+session}:{})},
+    body:data?JSON.stringify(data):undefined
+  });
+  const screenshot=(await require('sharp')({create:{width:200,height:400,channels:3,background:'blue'}}).png().toBuffer()).toString('base64');
+  const payload={action:'submit',requestId:randomUUID(),packageId:'50',reference:'PAYMENT-TEST-123',
+    screenshot,coins:100000,naira:1,status:'approved'};
+  assert.equal((await request('/api/v3/payments',null,payload)).status,401);
+  assert.equal((await request('/api/v3/payments','payment-member',payload,'https://example.com')).status,403);
+  assert.equal((await request('/api/v3/payments','payment-member',{...payload,packageId:'999'})).status,400);
+  assert.equal((await request('/api/v3/payments','payment-member',{...payload,screenshot:undefined})).status,400);
+  assert.equal((await request('/api/v3/payments','payment-member',{...payload,screenshot:'aW52YWxpZA=='})).status,400);
+  const submit=await request('/api/v3/payments','payment-member',payload);
+  assert.equal(submit.status,200);
+  const {id}=await submit.json();
+  assert.equal(id,payload.requestId);
+  assert.equal(store.user(member).coins,10);
+  assert.equal((await request('/api/v3/payments','payment-member',payload)).status,200);
+  assert.equal(store.get('SELECT count(*) AS n FROM v3_payments').n,1);
+  const own=await (await request('/api/v3/payments','payment-member')).json();
+  assert.deepEqual(own.packages.map(({naira,coins})=>[naira,coins]),[[500,50],[1000,100],[2000,200]]);
+  assert.equal(own.bank,'OPay');
+  assert.equal(own.accountNumber,'8059692394');
+  assert.equal(own.items[0].coins,50);
+  assert.equal(own.items[0].status,'pending');
+  assert.equal(Object.hasOwn(own.items[0],'email'),false);
+  assert.equal((await (await request('/api/v3/payments','payment-other')).json()).items.length,0);
+  const attachment='/api/v3/payments?attachment='+id;
+  assert.equal((await request(attachment,null)).status,401);
+  assert.equal((await request(attachment,'payment-other')).status,404);
+  assert.equal((await request(attachment+'&review=1','payment-other')).status,403);
+  const receipt=await request(attachment,'payment-member');
+  assert.equal(receipt.headers.get('content-type'),'image/jpeg');
+  assert.equal((await require('sharp')(Buffer.from(await receipt.arrayBuffer())).metadata()).height,400);
+  assert.equal((await request('/api/v3/payments?review=1','payment-other')).status,403);
+  const review={action:'review',paymentId:id,decision:'approved',coins:200000};
+  assert.equal((await request('/api/v3/payments','payment-other',review)).status,403);
+  const approvals=await Promise.all([request('/api/v3/payments','payment-owner',review),request('/api/v3/payments','payment-owner',review)]);
+  assert.deepEqual(approvals.map(response=>response.status),[200,200]);
+  assert.equal(store.user(member).coins,60);
+  assert.equal(store.all("SELECT * FROM ledger WHERE kind='coin_purchase'").length,1);
+  assert.equal((await request('/api/v3/payments','payment-owner',{...review,decision:'rejected',reason:'Late review'})).status,409);
+  assert.equal((await request('/api/v3/payments','payment-other',{...payload,requestId:randomUUID()})).status,409);
+  assert.ok(store.notices(store.user(member)).some(row=>row.title==='Coin payment approved'));
+  const support=await (await request('/api/community',null)).json();
+  assert.equal(support.support,'https://wa.me/message/264FM6MC5QN3G1');
+  const html=await (await request('/',null)).text();
+  assert.ok(!html.includes('COMING SOON'));
+  assert.ok(html.includes('href="https://wa.me/message/264FM6MC5QN3G1" target="_blank" rel="noopener noreferrer" id="support-button"'));
+});
+
+test('rejected receipts stay rejected, preserve coin balances and prevent duplicate references',t=>{
+  const {store,owner,member}=fixture(t);
+  const requestId=randomUUID();
+  const payload={requestId,packageId:'100',reference:'ABC-123-XYZ'};
+  const screenshot=Buffer.from('receipt fixture');
+  store.v3.submitPayment(member,payload,screenshot);
+  assert.throws(()=>store.v3.reviewPayment(owner,{paymentId:requestId,decision:'rejected',reason:''}),{status:400});
+  store.v3.reviewPayment(owner,{paymentId:requestId,decision:'rejected',reason:'The transfer did not arrive.'});
+  assert.equal(store.user(member).coins,10);
+  assert.equal(store.v3.paymentRows(member,false).items[0].reason,'The transfer did not arrive.');
+  assert.throws(()=>store.v3.reviewPayment(owner,{paymentId:requestId,decision:'approved'}),{status:409});
+  assert.throws(()=>store.v3.submitPayment(member,{...payload,requestId:randomUUID(),reference:'abc123xyz'},Buffer.from('other receipt')),{status:409});
+  assert.throws(()=>store.v3.submitPayment(member,{...payload,requestId:randomUUID(),reference:'DIFFERENT123'},screenshot),{status:409});
+});
+
+test('payment migration persists pending evidence and approval safely across restarts',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'portal-payments-'));
+  const file=path.join(dir,'portal.sqlite');
+  let store=new Store(file);
+  t.after(async()=>{store.db.close();await fs.rm(dir,{recursive:true,force:true});});
+  const owner=seedFounder(store);
+  const member=store.register({email:'persistent-payment@example.com',name:'Member',digest:'test'}).id;
+  const requestId=randomUUID(),receipt=Buffer.from('persistent private receipt');
+  store.v3.submitPayment(member,{requestId,packageId:'200',reference:'PERSISTENT-PAYMENT'},receipt);
+  store.db.close();
+  store=new Store(file);
+  assert.equal(Buffer.from(store.v3.payment(member,requestId,false).screenshot).toString(),receipt.toString());
+  store.v3.reviewPayment(owner,{paymentId:requestId,decision:'approved'});
+  store.db.close();
+  store=new Store(file);
+  store.v3.reviewPayment(owner,{paymentId:requestId,decision:'approved'});
+  assert.equal(store.user(member).coins,210);
+});
