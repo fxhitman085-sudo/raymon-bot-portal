@@ -450,3 +450,4 @@ progress::-moz-progress-bar { background:#1d4ed8; }
 #payment-form .button,#payment-form textarea { margin-top:10px; }
 @media(max-width:1000px) { .payment-layout { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:380px) { .payment-packages label { padding:9px 5px; gap:4px; } }
+.payment-packages label span { min-width:0; overflow-wrap:anywhere; }
