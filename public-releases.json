@@ -1,0 +1,11 @@
+[
+  {
+    "id": "community-release-news-v1",
+    "changes": [
+      {
+        "audience": "public",
+        "summary": "Bot and website updates will now appear here with a short explanation of what changed."
+      }
+    ]
+  }
+]
