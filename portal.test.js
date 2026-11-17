@@ -3,18 +3,31 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
-const {randomUUID}=require('node:crypto');
+const {randomUUID,scryptSync}=require('node:crypto');
 const {Store,DAY,OWNER_EMAIL}=require('./store');
 const {createServer,portalPaths,startRenewalNotices}=require('./server');
 const {Worker}=require('./worker');
 
 const memberEmail='member@gmail.com';
 const password='a long test-only password';
+function seedFounder(store,plaintext){
+  const id=randomUUID(),salt='4'.repeat(32);
+  const key=plaintext?scryptSync(plaintext,Buffer.from(salt,'hex'),64,{N:32768,r:8,p:3,maxmem:40*1024*1024}):null;
+  store.tx(()=>{
+    store.run('INSERT INTO users(id,email,name,created) VALUES (?,?,?,?)',id,OWNER_EMAIL,'Founder',store.clock());
+    store.run('INSERT INTO owner VALUES (1,?)',id);
+    store.run('INSERT INTO passwords VALUES (?,?,?)',OWNER_EMAIL,id,key?salt+':'+key.toString('hex'):'test');
+    store.createProfile(id,'founder');
+    store.credit(id,10,'starter','One-time starter coins');
+  });
+  return id;
+}
+
 function fixture(t){
   let now=Date.now();
   const store=new Store(':memory:',()=>now,2);
   t.after(()=>store.db.close());
-  const owner=store.register({email:OWNER_EMAIL,name:'Owner',digest:'test',ownerAuthorized:true}).id;
+  const owner=seedFounder(store);
   const member=store.register({email:memberEmail,name:'Member',digest:'test'}).id;
   return {store,owner,member,clock:()=>now,advance:ms=>now+=ms};
 }
@@ -98,7 +111,7 @@ test('starter coins are granted once and an existing owner cannot be replaced',t
   assert.equal(store.user(member).coins,10);
   assert.equal(store.history(member).length,1);
   assert.throws(()=>store.register({email:memberEmail,name:'Duplicate',digest:'other'}),{status:409});
-  assert.throws(()=>store.register({email:OWNER_EMAIL,name:'Imposter',digest:'other',ownerAuthorized:true}),{status:409});
+  assert.throws(()=>store.register({email:OWNER_EMAIL,name:'Imposter',digest:'other',ownerAuthorized:true}),{status:403});
   assert.equal(store.password(OWNER_EMAIL).user_id,owner);
   assert.equal(store.user(owner).is_owner,1);
 });
@@ -207,7 +220,7 @@ test('five bots share one balance and users and owners can cancel individual dep
   let now=Date.now();
   const store=new Store(':memory:',()=>now);
   t.after(()=>store.db.close());
-  const owner=store.register({email:OWNER_EMAIL,name:'Owner',digest:'test',ownerAuthorized:true}).id;
+  const owner=seedFounder(store);
   const member=store.register({email:memberEmail,name:'Member',digest:'test'}).id;
   store.admin(owner,member,{action:'grant',amount:60,reason:'Fund five bots'});
   for(let i=0;i<5;i++)store.pair(member,'+234801234567'+i,{add:true});
@@ -293,8 +306,8 @@ test('Railway defaults put the database and worker under the volume and honor ex
 
 test('HTTP password signup and login, protected owner, origin and worker access',async t=>{
   const {store}=fixture(t);
-  const workerToken='worker-test-token-'.repeat(3), ownerSignupToken='owner-test-token-'.repeat(3), origin='http://localhost:3000';
-  const server=createServer({store,origin,ownerSignupToken,workerToken});
+  const workerToken='worker-test-token-'.repeat(3), origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>server.close(resolve)));
   const root='http://127.0.0.1:'+server.address().port;
@@ -325,16 +338,16 @@ test('HTTP password signup and login, protected owner, origin and worker access'
 test('owner sign-in survives a restart, and password recovery keeps the same account and wallet',async t=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'portal-account-test-'));
   const file=path.join(dir,'portal.sqlite'), emails=[];
-  const origin='http://localhost:3000', ownerSignupToken='s'.repeat(40);
+  const origin='http://localhost:3000';
   let now=Date.now(),store,server;
   t.after(async()=>{
     if(server)await new Promise(resolve=>server.close(resolve));
     store?.db.close();
     await fs.rm(dir,{recursive:true,force:true});
   });
-  async function boot(setup){
+  async function boot(){
     store=new Store(file,()=>now);
-    server=createServer({store,origin,workerToken:'w'.repeat(40),ownerSignupToken:setup,
+    server=createServer({store,origin,workerToken:'w'.repeat(40),
       sendMail:async mail=>{emails.push(mail);}});
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   }
@@ -343,12 +356,9 @@ test('owner sign-in survives a restart, and password recovery keeps the same acc
     headers:{origin,'Content-Type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)});
   const credentials={email:OWNER_EMAIL,password};
   const cookieOf=response=>response.headers.get('set-cookie').split(';')[0];
-  await boot(ownerSignupToken);
-  const registration=await post('/api/auth/register',{...credentials,name:'Owner',ownerToken:ownerSignupToken});
-  assert.equal(registration.status,201);
-  const id=store.password(OWNER_EMAIL).user_id;
+  await boot();
+  const id=seedFounder(store,password);
   store.admin(id,id,{action:'grant',amount:37,reason:'Persisted balance'});
-  await post('/api/logout',{},cookieOf(registration));
   await new Promise(resolve=>server.close(resolve));server=null;
   store.db.close();store=null;
   await boot();
@@ -379,22 +389,25 @@ test('owner sign-in survives a restart, and password recovery keeps the same acc
   assert.equal(recovered.user.coins,47);
 });
 
-test('owner can use the one-time setup token and a legacy user can keep their account',async t=>{
+test('public signup cannot create a Founder and a legacy user can keep their account',async t=>{
   const store=new Store(':memory:');
   t.after(()=>store.db.close());
   store.run('INSERT INTO users VALUES (?,?,?,?,?,?)','legacy','legacy@gmail.com','Legacy',25,0,Date.now());
   store.putSession('legacy','legacy-session');
-  const origin='http://localhost:3000', ownerSignupToken='owner-setup-secret-'.repeat(3);
-  const server=createServer({store,origin,ownerSignupToken,workerToken:'w'.repeat(40)});
+  const origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken:'w'.repeat(40)});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>server.close(resolve)));
   const post=(route,data,cookie)=>fetch('http://127.0.0.1:'+server.address().port+route,{
     method:'POST',headers:{origin,'Content-Type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)
   });
-  const owner=await post('/api/auth/register',{email:OWNER_EMAIL,password,name:'Owner',ownerToken:ownerSignupToken});
-  assert.equal(owner.status,201);
-  assert.equal((await owner.json()).user.isOwner,true);
-  assert.equal((await post('/api/auth/register',{email:OWNER_EMAIL,password,name:'Owner',ownerToken:ownerSignupToken})).status,409);
+  const owner=await post('/api/auth/register',{email:OWNER_EMAIL,password,name:'Owner',ownerToken:'previous-token',isOwner:true,role:'founder'});
+  assert.equal(owner.status,403);
+  assert.equal(store.get('SELECT * FROM owner'),undefined);
+  const ordinary=await post('/api/auth/register',{email:'regular@example.com',password,name:'Regular',ownerToken:'previous-token',role:'founder',isOwner:true});
+  assert.equal(ordinary.status,201);
+  assert.equal((await ordinary.json()).user.isOwner,false);
+  assert.equal(store.get('SELECT * FROM owner'),undefined);
   assert.equal((await post('/api/auth/register',{email:'legacy@gmail.com',password,name:'Other'})).status,409);
   assert.equal((await post('/api/auth/set-password',{password})).status,401);
   const legacy=await post('/api/auth/set-password',{password},'raymon=legacy-session');
@@ -623,4 +636,170 @@ test('restart keeps the auth generation and rejects stale worker reports',t=>{
   assert.equal(store.deployment(member).state,'online');
   assert.equal(store.user(member).coins,0);
   assert.equal(store.history(member).filter(row=>row.kind==='uptime').length,1);
+});
+
+test('administrator permissions are independent, immediately revocable, and protect Founder and staff accounts',t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'staff-target@example.com',name:'Target',digest:'test'}).id;
+  const v3=store.v3;
+  assert.throws(()=>v3.setStaff(member,{userId:other,action:'level',level:7}),{status:403});
+  assert.throws(()=>v3.setStaff(owner,{userId:owner,action:'level',level:7}),{status:404});
+  v3.setStaff(owner,{userId:member,action:'level',level:1});
+  v3.setPermissions(owner,{level:1,permissions:['coins.adjust','announcements.publish']});
+  assert.equal(Object.hasOwn(store.staffAccountData(member).users.find(row=>row.id===other),'coins'),false);
+  store.admin(member,other,{action:'grant',amount:3,reason:'Support adjustment'});
+  assert.equal(store.user(other).coins,13);
+  assert.throws(()=>store.admin(member,owner,{action:'grant',amount:3,reason:'Target protected'}),{status:403});
+  assert.throws(()=>v3.setPermissions(member,{level:7,permissions:['users.moderate']}),{status:403});
+  v3.setStaff(owner,{userId:member,action:'level',level:7});
+  assert.throws(()=>store.admin(member,other,{action:'grant',amount:3,reason:'No inheritance'}),{status:403});
+  v3.setPermissions(owner,{level:7,permissions:['users.moderate']});
+  v3.setStaff(owner,{userId:other,action:'level',level:1});
+  assert.throws(()=>store.admin(member,other,{action:'ban',reason:'Staff protected'}),{status:403});
+  v3.setStaff(owner,{userId:member,action:'suspend'});
+  assert.throws(()=>store.staffAccountData(member),{status:403});
+  v3.setStaff(owner,{userId:member,action:'restore'});
+  assert.equal(store.staffAccountData(member).users.length,3);
+  v3.setStaff(owner,{userId:member,action:'remove'});
+  assert.equal(v3.role(store.user(member)).level,null);
+  assert.ok(v3.staff(owner).audit.some(row=>row.action==='account.grant'&&row.target===other));
+});
+
+test('promo codes enforce activation, expiry and redemption limits atomically',t=>{
+  const {store,owner,member,clock,advance}=fixture(t);
+  const other=store.register({email:'promo-target@example.com',name:'Other',digest:'test'}).id;
+  const v3=store.v3, expires=clock()+DAY;
+  const promo={code:'WELCOME-3',amount:15,expires,maxClaims:1,active:true};
+  assert.throws(()=>v3.promoSave(member,promo),{status:403});
+  v3.promoSave(owner,promo);
+  assert.throws(()=>v3.promoSave(owner,promo),{status:409});
+  const {id}=v3.promos(owner).codes[0];
+  v3.promoSave(owner,{promoId:id,active:false});
+  assert.throws(()=>v3.redeem(member,promo.code),{status:404});
+  v3.promoSave(owner,{promoId:id,active:true});
+  assert.deepEqual(v3.redeem(member,' welcome-3 '),{amount:15});
+  assert.throws(()=>v3.redeem(member,promo.code),{status:409});
+  assert.throws(()=>v3.redeem(other,promo.code),{status:409});
+  assert.equal(store.user(member).coins,25);
+  assert.equal(v3.promos(owner,id).history[0].amount,15);
+  v3.promoSave(owner,{promoId:id,amount:20,expires,maxClaims:2,active:true});
+  assert.equal(v3.promos(owner,id).history[0].amount,15);
+  advance(DAY);
+  assert.throws(()=>v3.redeem(other,promo.code),{status:404});
+});
+
+test('support tickets and sanitized screenshots are private and staff replies notify the requester',async t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'support-target@example.com',name:'Other',digest:'test'}).id;
+  store.v3.setStaff(owner,{userId:other,action:'level',level:1});
+  store.v3.setPermissions(owner,{level:1,permissions:['tickets.view']});
+  store.putSession(owner,'owner-support');
+  store.putSession(member,'member-support');
+  store.putSession(other,'other-support');
+  const origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const request=(route,session,data)=>fetch('http://127.0.0.1:'+server.address().port+'/api/'+route,{
+    method:data?'POST':'GET',headers:{origin,'Content-Type':'application/json',...(session?{cookie:'raymon='+session}:{})},
+    body:data?JSON.stringify(data):undefined
+  });
+  const screenshot=(await require('sharp')({create:{width:2000,height:500,channels:3,background:'blue'}}).png().toBuffer()).toString('base64');
+  const draft={action:'create',subject:'Pairing help',message:'My code did not show.'};
+  assert.equal((await request('v3/tickets','member-support',{...draft,screenshot:'QUJDRA=='})).status,400);
+  const opened=await request('v3/tickets','member-support',{...draft,screenshot});
+  assert.equal(opened.status,200);
+  const {id}=await opened.json();
+  const route='v3/ticket?id='+id;
+  assert.equal((await request(route,'other-support')).status,404);
+  assert.equal((await request(route+'&staff=1','member-support')).status,403);
+  const staffView=await (await request(route+'&staff=1','other-support')).json();
+  const attachment=route+'&attachment='+staffView.messages[0].id;
+  assert.equal((await request(attachment,null)).status,401);
+  assert.equal((await request(attachment,'other-support')).status,404);
+  const image=await request(attachment,'member-support');
+  assert.equal(image.headers.get('content-type'),'image/jpeg');
+  assert.equal((await require('sharp')(Buffer.from(await image.arrayBuffer())).metadata()).width,1600);
+  const reply={action:'reply',ticketId:id,message:'Try starting a new pairing attempt.'};
+  assert.equal((await request('v3/tickets?staff=1','other-support',reply)).status,403);
+  assert.equal((await request('v3/tickets?staff=1','owner-support',{action:'assign',ticketId:id,assignee:other})).status,200);
+  assert.equal((await request('v3/tickets?staff=1','owner-support',reply)).status,200);
+  const {notices}=await (await request('notifications','member-support')).json();
+  const notice=notices.find(row=>row.title==='New support reply');
+  assert.equal(notice.ticketId,id);
+  assert.equal(notice.read,false);
+  assert.equal((await request('v3/tickets?staff=1','owner-support',{action:'close',ticketId:id})).status,200);
+  assert.equal((await request('v3/tickets','member-support',reply)).status,409);
+  store.v3.setStaff(owner,{userId:other,action:'suspend'});
+  assert.equal((await request(attachment+'&staff=1','other-support')).status,403);
+});
+
+test('referral rankings use verified numbers and support idempotent awards in Lagos periods',t=>{
+  const {store,owner,member,clock,advance}=fixture(t);
+  const v3=store.v3, referral=store.user(member).referral_code;
+  const add=email=>store.register({email,name:'Invitee',digest:'test',referral}).id;
+  const invitee=add('invitee@example.com');
+  assert.equal(v3.rankings(member,'all',0).rows.length,0);
+  v3.referralAction(owner,{action:'configure',period:'daily',mode:'automatic',prizes:[20]});
+  store.pair(invitee,phone);
+  const bot=store.deployment(invitee);
+  store.sync([report(bot,'online')]);
+  assert.equal(v3.rankings(member,'all',0).rows[0].referrals,1);
+  store.control(invitee,'cancel');
+  const recycled=add('recycled@example.com');
+  store.pair(recycled,phone);
+  store.sync([report(store.deployment(recycled),'online')]);
+  assert.equal(v3.rankings(member,'all',0).rows[0].referrals,1);
+  const {end}=v3.rankings(member,'daily',0);
+  assert.equal(new Date(end).getUTCHours(),23);
+  advance(end-clock());
+  const before=store.user(member).coins;
+  v3.settleAutomatic();
+  v3.settleAutomatic();
+  assert.equal(store.user(member).coins,before+20);
+  assert.equal(v3.referralAdmin(owner,'daily',1).award.winners[0].amount,20);
+  v3.referralAction(owner,{action:'configure',period:'all',mode:'manual',prizes:[30]});
+  const {preview,start}=v3.referralAdmin(owner,'all',0);
+  const award={action:'approve',period:'all',preview:JSON.stringify(preview),expectedStart:start};
+  assert.throws(()=>v3.referralAction(member,award),{status:403});
+  v3.referralAction(owner,{action:'review',invitee,excluded:true});
+  assert.throws(()=>v3.referralAction(owner,award),{status:409});
+  v3.referralAction(owner,{action:'review',invitee,excluded:false});
+  v3.referralAction(owner,award);
+  assert.throws(()=>v3.referralAction(owner,award),{status:409});
+  assert.equal(store.user(member).coins,before+50);
+});
+
+test('Version 3 migrations preserve a Founder, balances, sessions and linked deployment generation',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'portal-v3-test-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const file=path.join(dir,'portal.sqlite'), now=Date.now();
+  let store=new Store(file,()=>now);
+  const owner=seedFounder(store),member=store.register({email:memberEmail,name:'Member',digest:'test',
+    referral:store.user(owner).referral_code}).id;
+  store.putSession(owner,'existing-owner-session');
+  store.putSession(member,'existing-session');
+  store.pair(member,phone);
+  const bot=store.deployment(member);
+  store.sync([report(bot,'online')]);
+  const expected=[store.user(owner).coins,store.user(member).coins];
+  // Recreate the prior schema without any Version 3 tables, keeping all existing records.
+  store.db.exec('PRAGMA foreign_keys=OFF');
+  for(const {name} of store.all("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'v3_%'"))
+    store.db.exec('DROP TABLE '+name);
+  store.db.close();
+  store=new Store(file,()=>now);
+  t.after(()=>store.db.close());
+  assert.equal(store.session('existing-owner-session').is_owner,1);
+  assert.equal(store.session('existing-session').id,member);
+  assert.deepEqual([store.user(owner).coins,store.user(member).coins],expected);
+  assert.equal(store.deployment(member).generation,bot.generation);
+  assert.equal(store.deployment(member).linked,1);
+  assert.equal(store.v3.rankings(owner,'all',0).rows[0].referrals,1);
+  assert.equal(store.v3.onboarding(member),null);
+  store.v3.saveOnboarding(member,3);
+  assert.equal(store.v3.onboarding(member),3);
+  store.v3.saveOnboarding(member,-1);
+  store.v3.saveOnboarding(member,0);
+  assert.equal(store.v3.onboarding(member),0);
 });

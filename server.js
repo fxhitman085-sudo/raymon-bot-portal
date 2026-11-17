@@ -12,7 +12,7 @@ const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
 
 const random=()=>randomBytes(32).toString('base64url');
-const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
+const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
 const equal=(left,right)=>typeof left==='string'&&typeof right==='string'&&Buffer.byteLength(left)===Buffer.byteLength(right)&&timingSafeEqual(Buffer.from(left),Buffer.from(right));
 const cookieValue=(req,name)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith(name+'='))?.slice(name.length+1);
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));};
@@ -103,7 +103,72 @@ async function avatarJpeg(bytes){
   }catch{throw new PortalError(400,'Choose a valid JPG, PNG, or WebP photo under 3 MB.');}
 }
 
-function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=false,sendMail=null,links={}}){
+async function ticketScreenshot(value){
+  if(value===undefined)return null;
+  if(typeof value!=='string'||value.length>4*1024*1024|| !/^[A-Za-z0-9+/]+={0,2}$/.test(value))
+    throw new PortalError(400,'Choose a JPG, PNG, or WebP screenshot under 3 MB.');
+  try{
+    const image=sharp(Buffer.from(value,'base64'),{limitInputPixels:20_000_000});
+    const {format,pages}=await image.metadata();
+    if(!['jpeg','png','webp'].includes(format)||pages>1)throw Error('Unsupported image');
+    const bytes=await image.autoOrient().resize({width:1600,height:1600,fit:'inside',withoutEnlargement:true})
+      .flatten({background:'#ffffff'}).jpeg({quality:82}).toBuffer();
+    if(bytes.length>1024*1024)throw Error('Image too large');
+    return bytes;
+  }catch{throw new PortalError(400,'Choose a valid JPG, PNG, or WebP screenshot under 3 MB.');}
+}
+
+async function v3Route({store,req,res,url,user,fresh,rateLimit}){
+  const v3=store.v3,id=user.id,route=url.pathname.slice('/api/v3/'.length),method=req.method;
+  const query=key=>url.searchParams.get(key);
+  const staff=query('staff')==='1', period=query('period')||'daily', previous=Number(query('previous')||0);
+  if(method==='GET'){
+    if(route==='staff')json(res,200,v3.staff(id));
+    else if(route==='rankings')json(res,200,v3.rankings(id,period,previous));
+    else if(route==='referrals')json(res,200,v3.referralAdmin(id,period,previous));
+    else if(route==='promos'){
+      const cursor=Number(query('claimBefore'));
+      json(res,200,v3.promos(id,query('promo'),query('before'),cursor>0&&Number.isSafeInteger(cursor)?cursor:null));
+    }
+    else if(route==='tickets'){
+      const stamp=Number(query('stamp')), before=query('before');
+      const items=v3.ticketInbox(id,staff,before&&Number.isSafeInteger(stamp)?{stamp,id:before}:null);
+      json(res,200,{items:items.slice(0,50),more:items.length>50});
+    }else if(route==='ticket'){
+      const ticket=query('id')||'';
+      if(query('attachment')){
+        const screenshot=v3.ticketAttachment(id,ticket,query('attachment'),staff);
+        res.writeHead(200,{'Content-Type':'image/jpeg'});
+        res.end(screenshot);
+      }else json(res,200,v3.ticketView(id,ticket,staff));
+    }else return false;
+    return true;
+  }
+  if(method!=='POST'||!['staff','permissions','promos','redeem','onboarding','referrals','tickets'].includes(route))return false;
+  if(route==='redeem'||route==='tickets'&&!staff)rateLimit(req,id,route==='redeem'?'promo-claim':'support-ticket');
+  if(route==='tickets'&&staff)v3.permit(id,'tickets.view');
+  const data=await body(req,route==='tickets'?4*1024*1024+16_384:undefined);
+  if(!data||typeof data!=='object'||Array.isArray(data))throw new PortalError(400,'Invalid request.');
+  fresh();
+  if(route==='tickets'){
+    if(staff&&data.action==='reply')v3.permit(id,'tickets.reply');
+    if(data.action==='reply')v3.ticket(id,typeof data.ticketId==='string'?data.ticketId:'',staff);
+    const screenshot=['create','reply'].includes(data.action)?await ticketScreenshot(data.screenshot):null;
+    fresh();
+    return json(res,200,v3.ticketAction(id,staff,data,screenshot)),true;
+  }
+  let result;
+  if(route==='staff')v3.setStaff(id,data);
+  else if(route==='permissions')v3.setPermissions(id,data);
+  else if(route==='promos')v3.promoSave(id,data);
+  else if(route==='redeem')result=v3.redeem(id,data.code);
+  else if(route==='onboarding')v3.saveOnboarding(id,data.step);
+  else v3.referralAction(id,data);
+  json(res,200,result||{ok:true});
+  return true;
+}
+
+function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null,links={}}){
   const base=new URL(origin), secure=base.protocol==='https:';
   if(!secure&&!['localhost','127.0.0.1'].includes(base.hostname))throw new Error('PUBLIC_ORIGIN must use HTTPS.');
   if(base.origin!==origin)throw new Error('PUBLIC_ORIGIN must be an origin without a trailing slash.');
@@ -219,13 +284,12 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         if(registering){
           const name=typeof data.name==='string'?data.name.trim().slice(0,90):'';
           if(!name)throw new PortalError(400,'Enter your name.');
-          const ownerAuthorized=typeof ownerSignupToken==='string'&&ownerSignupToken.length>=32&&equal(data.ownerToken,ownerSignupToken);
-          if(email===OWNER_EMAIL&&!ownerAuthorized)throw new PortalError(403,'Enter the owner setup token to create this account.');
+          if(email===OWNER_EMAIL)throw new PortalError(403,'Use the existing Founder sign-in.');
           const username=optionalUsername(data.username);
           const referral=typeof data.referral==='string'&&/^[a-f0-9]{16}$/.test(data.referral)?data.referral:null;
           if(data.confirmation!==undefined&&data.confirmation!==data.password)throw new PortalError(400,'Passwords do not match.');
           const encoded=await passwordWork(newPassword(data.password));
-          return finishAuth(res,session,store.register({email,name,digest:encoded,ownerAuthorized,username,referral}),201);
+          return finishAuth(res,session,store.register({email,name,digest:encoded,username,referral}),201);
         }
         const password=data?.password;
         if(typeof password!=='string'||password.length>128)throw new PortalError(401,'Email or password is incorrect.');
@@ -238,6 +302,10 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
+      if(route.startsWith('/api/v3/')){
+        const fresh=()=>{if(store.session(session)?.id!==user.id)throw new PortalError(401,'Sign in to continue.');};
+        if(await v3Route({store,req,res,url,user,fresh,rateLimit}))return;
+      }
       if(method==='POST'&&route==='/api/auth/set-password'){
         const data=await body(req), email=emailAddress(user.email);
         if(!email)throw new PortalError(409,'This account email cannot be used for password sign-in.');
@@ -327,7 +395,6 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         return json(res,200,{events:store.eventLogs(user.id,id)});
       }
       if(method==='POST'&&route==='/api/owner/announcements'){
-        if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');
         const data=await body(req);
         const title=typeof data?.title==='string'?data.title.trim():'';
         const description=typeof data?.description==='string'?data.description.trim():'';
@@ -349,8 +416,7 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         return json(res,200,{ok:true});
       }
       if(route==='/api/owner'&&method==='GET'){
-        if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');
-        return json(res,200,store.ownerData(url.searchParams.get('search')||'',url.searchParams.get('user')||undefined));
+        return json(res,200,store.staffAccountData(user.id,url.searchParams.get('search')||'',url.searchParams.get('user')||undefined));
       }
       if(route==='/api/owner/rewards'&&method==='POST'){
         if(!user.is_owner)throw new PortalError(403,'Owner access required.');
@@ -358,7 +424,6 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         return json(res,200,{ok:true});
       }
       if(route==='/api/owner'&&method==='POST'){
-        if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');
         const data=await body(req);
         if(!data||typeof data.userId!=='string')throw new PortalError(400,'Select a user.');
         store.admin(user.id,data.userId,data);
@@ -397,13 +462,19 @@ if(require.main===module){
   const origin=process.env.PUBLIC_ORIGIN||'http://localhost:3000';
   const sendMail=createMailer(process.env.RESEND_API_KEY,process.env.PORTAL_EMAIL_FROM);
   const server=createServer({store,origin,sendMail,
-    ownerSignupToken:process.env.OWNER_SIGNUP_TOKEN,workerToken:process.env.WORKER_TOKEN,railwayProxy:!!process.env.RAILWAY_SERVICE_ID,
+    workerToken:process.env.WORKER_TOKEN,railwayProxy:!!process.env.RAILWAY_SERVICE_ID,
     links:{community:process.env.PORTAL_COMMUNITY_URL,support:process.env.PORTAL_SUPPORT_URL}});
   const runWorker=process.env.PORTAL_RUN_WORKER==='1'||
     (!!process.env.RAILWAY_SERVICE_ID&&process.env.PORTAL_RUN_WORKER!=='0');
   if(runWorker&&process.env.RAILWAY_SERVICE_ID&&!workerPersistent)
     console.error('Worker sessions are outside a Railway volume. WhatsApp accounts may need to link again after redeploy.');
   const stopNotices=sendMail&&startRenewalNotices(store,sendMail,origin);
+  const settlePrizes=()=>{
+    try{store.v3.settleAutomatic();}catch(error){console.error('Could not process leaderboard prizes:',error.message);}
+  };
+  const prizeTimer=setInterval(settlePrizes,60_000);
+  prizeTimer.unref();
+  settlePrizes();
   let stopWorker,closing=false;
   server.listen(port,'::',()=>{
     const actualPort=server.address().port;
@@ -419,6 +490,7 @@ if(require.main===module){
     const serverClosed=new Promise(resolve=>server.close(resolve));
     await stopWorker?.();
     await stopNotices?.();
+    clearInterval(prizeTimer);
     await serverClosed;
     store.db.close();
   }

@@ -1,5 +1,6 @@
 const {DEFAULTS,validate,groupId,groupOptions}=require('./bot-settings');
 const {DatabaseSync}=require('node:sqlite');
+const {PortalV3,ACCOUNT_PERMISSIONS,ADMIN_ACTIONS}=require('./portal-v3');
 const {randomUUID,createHash}=require('node:crypto');
 
 const DAY=86_400_000, PRICE=10, PAIR_WINDOW=180_000;
@@ -135,6 +136,7 @@ class Store {
         this.createProfile(user.id);
       }
     });
+    this.v3=new PortalV3(this,PortalError);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
   all(sql,...params){return this.db.prepare(sql).all(...params);}
@@ -198,29 +200,19 @@ class Store {
     });
   }
   hasPassword(userId){return !!this.get('SELECT 1 FROM passwords WHERE user_id=?',userId);}
-  register({email,name,digest,ownerAuthorized=false,username=null,referral=null}){
+  register({email,name,digest,username=null,referral=null}){
     return this.tx(()=>{
-      const isOwner=email===OWNER_EMAIL;
-      if(isOwner&&!ownerAuthorized)throw new PortalError(403,'The owner account requires its setup token.');
-      const pinned=isOwner&&this.get('SELECT user_id FROM owner WHERE singleton=1');
-      const existing=this.get('SELECT id FROM users WHERE lower(email)=?',email);
-      const priorOwner=pinned&&this.user(pinned.user_id);
-      if(this.password(email)||(priorOwner&&this.hasPassword(priorOwner.id))||(existing&&!isOwner))
+      if(email===OWNER_EMAIL)throw new PortalError(403,'Use the existing Founder sign-in.');
+      if(this.password(email)||this.get('SELECT id FROM users WHERE lower(email)=?',email))
         throw new PortalError(409,'This account already exists. Sign in or use your existing session to set a password.');
-      if(isOwner&&existing&&existing.id!==priorOwner?.id)
-        throw new PortalError(409,'This email is tied to an existing account.');
-      const id=priorOwner?.id||randomUUID();
-      if(!priorOwner){
-        this.run('INSERT INTO users(id,email,name,created) VALUES (?,?,?,?)',id,email,name,this.clock());
-        this.credit(id,10,'starter','One-time starter coins',null,'starter:'+id);
-        if(isOwner)this.run('INSERT INTO owner VALUES (1,?)',id);
-      }
+      const id=randomUUID();
+      this.run('INSERT INTO users(id,email,name,created) VALUES (?,?,?,?)',id,email,name,this.clock());
+      this.credit(id,10,'starter','One-time starter coins',null,'starter:'+id);
       this.run('INSERT INTO passwords VALUES (?,?,?)',email,id,digest);
-      if(!priorOwner){
-        this.createProfile(id,username,referral);
-        this.recordReferral(id);
-        this.event(id,null,'Welcome to RAYMON BOT','Your account received 10 starter coins. Deploy a bot to get started.');
-      }else if(username)this.updateUsername(id,username);
+      this.createProfile(id,username,referral);
+      this.recordReferral(id);
+      this.v3.saveOnboarding(id,0);
+      this.event(id,null,'Welcome to RAYMON BOT','Your account received 10 starter coins. Deploy a bot to get started.');
       return this.user(id);
     });
   }
@@ -349,7 +341,9 @@ class Store {
     });
   }
   event(userId,deploymentId,title,description){
-    this.run('INSERT INTO portal_events VALUES (?,?,?,?,?,?)',randomUUID(),userId,deploymentId,title,description,this.clock());
+    const id=randomUUID();
+    this.run('INSERT INTO portal_events VALUES (?,?,?,?,?,?)',id,userId,deploymentId,title,description,this.clock());
+    return id;
   }
   eventLogs(id,botId){
     this.requireActive(id);
@@ -362,15 +356,19 @@ class Store {
     return this.all('SELECT id,title,description,created FROM portal_announcements ORDER BY created DESC,rowid DESC LIMIT 30');
   }
   publishAnnouncement(id,title,description){
-    const user=this.requireActive(id);
-    if(!user.is_owner)throw new PortalError(403,'Owner access required.');
-    this.run('INSERT INTO portal_announcements VALUES (?,?,?,?)',randomUUID(),title,description,this.clock());
+    this.tx(()=>{
+      this.v3.permit(id,'announcements.publish');
+      const announcement=randomUUID();
+      this.run('INSERT INTO portal_announcements VALUES (?,?,?,?)',announcement,title,description,this.clock());
+      this.v3.audit(id,'announcement.publish',announcement,title);
+    });
   }
   notices(user){
-    const entries=this.all(`SELECT id,title,description,created FROM portal_events WHERE user_id=?
-      UNION ALL SELECT 'billing:'||id,'Bot maintenance charge',reason||' ('||delta||' coins)',created
+    const entries=this.all(`SELECT e.id,e.title,e.description,e.created,n.ticket_id AS ticketId,n.staff AS staffTicket
+      FROM portal_events e LEFT JOIN v3_ticket_notices n ON n.event_id=e.id WHERE e.user_id=?
+      UNION ALL SELECT 'billing:'||id,'Bot maintenance charge',reason||' ('||delta||' coins)',created,NULL,NULL
       FROM ledger WHERE user_id=? AND kind='uptime'
-      UNION ALL SELECT 'announcement:'||id,title,description,created FROM portal_announcements
+      UNION ALL SELECT 'announcement:'||id,title,description,created,NULL,NULL FROM portal_announcements
       WHERE created>=? ORDER BY created DESC LIMIT 80`,user.id,user.id,user.created);
     for(const bot of this.deployments(user.id)){
       if(this.lowBalance(bot,user))entries.unshift({id:'low:'+bot.id+':'+bot.paid_until,title:'Low coin balance',
@@ -536,9 +534,10 @@ class Store {
       throw new PortalError(400,'Choose an action and enter a reason of up to 180 characters.');
     reason=reason.trim();
     return this.tx(()=>{
-      const actor=this.requireActive(actorId), target=this.user(targetId);
-      if(!actor.is_owner)throw new PortalError(403,'Owner access required.');
+      const actor=this.v3.permit(actorId,ADMIN_ACTIONS[action]), target=this.user(targetId);
       if(!target||target.closed_at)throw new PortalError(404,'User not found.');
+      if(!actor.is_owner&&(target.is_owner||this.get('SELECT 1 FROM v3_admins WHERE user_id=?',target.id)))
+        throw new PortalError(403,'Only the Founder can manage staff accounts.');
       if(action==='cancel'){
         const d=typeof deploymentId==='string'&&this.deployment(targetId,deploymentId);
         if(!d)throw new PortalError(404,'Bot not found.');
@@ -563,6 +562,7 @@ class Store {
         }
       }
       this.run('INSERT INTO audit VALUES (?,?,?,?,?,?)',randomUUID(),actorId,targetId,action,reason,this.clock());
+      this.v3.audit(actorId,'account.'+action,targetId,reason);
     });
   }
   state(d,user,now=this.clock()){
@@ -616,7 +616,8 @@ class Store {
     return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
       username:user.username,theme:user.theme||'dark',created:user.created,referralCode:user.referral_code,
       avatarVersion:this.get('SELECT version FROM portal_avatars WHERE user_id=?',user.id)?.version||null,
-      banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},capacity:{used,accountUsed,total:this.maxBots},
+      banned:!!user.banned,needsPassword:!this.hasPassword(user.id),staff:this.v3.role(user),
+      onboarding:this.v3.onboarding(user.id)},capacity:{used,accountUsed,total:this.maxBots},
       unread:this.notices(user).filter(row=>!row.read).length,workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
       dailyBonus,referralProgram:{enabled:!!rewards.referralEnabled,inviterAmount:rewards.inviterAmount,
         inviteeAmount:rewards.inviteeAmount,trigger:rewards.referralTrigger,
@@ -624,12 +625,14 @@ class Store {
       deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
-  ownerData(search='',id){
+  ownerData(search='',id,{phoneSearch=true}={}){
     const q='%'+search.toLowerCase().slice(0,100)+'%';
-    const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned,p.closed_at FROM users u LEFT JOIN portal_profiles p ON p.user_id=u.id
+    const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned,p.closed_at,
+      EXISTS(SELECT 1 FROM owner WHERE user_id=u.id) AS founder,
+      EXISTS(SELECT 1 FROM v3_admins WHERE user_id=u.id) AS staff FROM users u LEFT JOIN portal_profiles p ON p.user_id=u.id
       WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? OR EXISTS
       (SELECT 1 FROM deployments d WHERE d.user_id=u.id AND d.state<>'cancelled' AND d.phone LIKE ?)
-      ORDER BY u.created DESC LIMIT 100`,q,q,q);
+      ORDER BY u.created DESC LIMIT 100`,q,q,phoneSearch?q:null);
     const bots=this.all("SELECT id,phone,intent,state,paid_until,pair_until,last_seen FROM deployments WHERE user_id=? AND state<>'cancelled' ORDER BY requested,id",id||'');
     const selected=id?this.user(id):null;
     const deployments=selected?bots.map(d=>({id:d.id,phone:d.phone,state:this.state(d,selected)})):[];
@@ -640,6 +643,20 @@ class Store {
     const daily=this.get("SELECT count(*) AS claims,coalesce(sum(delta),0) AS paid FROM ledger WHERE kind='daily_bonus'");
     return {stats,users,deployments,rewards:{settings:this.rewardConfig(),daily,referrals:this.referralStats()},
       history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
+  }
+  staffAccountData(actorId,search='',id){
+    const actor=this.requireActive(actorId);
+    if(actor.is_owner)return this.ownerData(search,id);
+    const {permissions}=this.v3.role(actor);
+    if(!permissions.some(key=>ACCOUNT_PERMISSIONS.includes(key)))throw new PortalError(403,'Account access required.');
+    const showCoins=permissions.includes('coins.view');
+    const showBots=permissions.includes('deployments.view');
+    const data=this.ownerData(search,id,{phoneSearch:showBots});
+    return {
+      users:data.users.map(({coins,...user})=>showCoins?{...user,coins}:user),
+      deployments:showBots?data.deployments:[],
+      history:showCoins?data.history:[],audit:[]
+    };
   }
   sync(reports){
     const now=this.clock();
@@ -712,6 +729,7 @@ class Store {
         if(d.verified_phone&&d.verified_phone!==d.phone)this.run('DELETE FROM verified_numbers WHERE phone=? AND user_id=?',d.verified_phone,d.user_id);
         this.run('INSERT OR IGNORE INTO verified_numbers (phone,user_id) VALUES (?,?)',d.phone,d.user_id);
         this.run('UPDATE deployments SET verified_phone=? WHERE id=?',d.phone,d.id);
+        this.v3.rememberPhone(d.user_id,d.phone);
       }
       this.codes.delete(d.id);
       if(d.state!=='online')this.event(d.user_id,d.id,'Bot connected','WhatsApp confirmed the deployment is connected.');
@@ -721,7 +739,10 @@ class Store {
         paidUntil=now+DAY;
       }
       this.run("UPDATE deployments SET intent='run',state='online',linked=1,paid_until=?,pair_until=0,last_seen=? WHERE id=?",paidUntil,now,d.id);
-      if(paidUntil>now)this.payReferral(d.user_id,'online');
+      if(paidUntil>now){
+        this.payReferral(d.user_id,'online');
+        if(d.intent==='pair'||d.paid_until<=now&&d.verified_phone===d.phone)this.v3.qualify(d.user_id,d.phone,now);
+      }
     }
   }
 }
