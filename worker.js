@@ -1,3 +1,4 @@
+const {Community}=require('./community');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const settings=require('./bot-settings');
@@ -17,6 +18,7 @@ class Worker {
     this.clock=clock;
     this.entries=new Map();
     this.authorizedUntil=0;
+    this.community=new Community({root,clock});
   }
   async tick(){
     const now=this.clock();
@@ -26,6 +28,7 @@ class Worker {
       const noCode=e.task.intent==='pair'&&!e.codeIssued&&!e.verified&&now-e.started>=PAIR_CODE_WAIT;
       return {id:e.task.id,generation:e.task.generation,restart:e.task.restart,
         status:e.failure||(noCode?'pair_no_code':e.verified&&e.bot?.connected?'online':code?'code':'connecting'),
+        ...(e.communityResult?{community:e.communityResult}:{}),
         ...(code?{code}:{}),...(e.groupResult?{groups:e.groupResult}:{}),...(e.bot?.portalUpdates&&!e.failure?{settings:{
           appliedRevision:e.bot.db.get('portal.settingsRevision'),values:settings.read(e.bot)
         }}:{})};
@@ -54,6 +57,9 @@ class Worker {
         if(entry){
           if(entry.bot?.portalUpdates&&task.settings)settings.apply(entry.bot,task.settings);
           entry.task=task;
+          this.community.run(entry,()=>!this.closed&&this.entries.get(task.id)===entry&&
+            entry.verified&&!entry.failure&&entry.bot?.connected&&!entry.bot.socketClosed&&
+            this.clock()<Math.min(entry.task.permitUntil,this.authorizedUntil));
           if(task.groups)this.groupSettings(entry,task.groups);
           else entry.groupResult=null;
           if(task.intent==='run')entry.code=null;
@@ -260,3 +266,4 @@ if(require.main===module){
   process.once('SIGINT',()=>void stop());
 }
 module.exports={Worker,samePhone,startWorker,createRuntimeBot};
+
