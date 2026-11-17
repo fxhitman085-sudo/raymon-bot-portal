@@ -55,6 +55,20 @@ test('pairing charges only when online, renews once, and pauses when coins run o
   assert.equal(store.history(member).filter(x=>x.kind==='uptime').length,2);
 });
 
+test('each dashboard reports only its own eligible deployments as its slot usage',t=>{
+  const {store,owner,member,advance}=fixture(t);
+  store.pair(owner,phone);
+  store.pair(member,phone2);
+  const active=store.deployment(member);
+  store.sync([report(active,'online')]);
+  const slots=id=>store.dashboard(store.user(id)).capacity;
+  assert.deepEqual(slots(member),{used:2,accountUsed:1,total:2});
+  assert.deepEqual(slots(owner),{used:2,accountUsed:1,total:2});
+  advance(180_001);
+  assert.deepEqual(slots(owner),{used:1,accountUsed:0,total:2});
+  assert.deepEqual(slots(member),{used:1,accountUsed:1,total:2});
+});
+
 test('expired pairing attempts cannot charge or permanently reserve a number',t=>{
   const {store,advance,owner,member}=fixture(t);
   store.pair(member,phone);

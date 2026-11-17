@@ -521,12 +521,14 @@ class Store {
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&code.expires>now&&!user.banned?code.value:null};
     });
-    const {used}=this.get(`SELECT COUNT(*) AS used FROM deployments d JOIN users u ON u.id=d.user_id
+    const {used,accountUsed}=this.get(`SELECT COUNT(*) AS used,
+      COUNT(CASE WHEN d.user_id=? THEN 1 END) AS accountUsed
+      FROM deployments d JOIN users u ON u.id=d.user_id
       WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
-      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,now,now,PRICE);
+      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,user.id,now,now,PRICE);
     return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
       username:user.username,theme:user.theme||'dark',created:user.created,referralCode:user.referral_code,
-      banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},capacity:{used,total:this.maxBots},
+      banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},capacity:{used,accountUsed,total:this.maxBots},
       unread:this.notices(user).filter(row=>!row.read).length,workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
       deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
   }

@@ -733,9 +733,7 @@ function renderOverview({user,capacity,price,workerAvailable},bots){
   setValue('active-bots',active);
   setValue('inactive-bots',bots.length-active);
   if(capacity){
-    setValue('slots-usage',capacity.used+' used · '+capacity.total+' total');
-    $('slots-meter').max=capacity.total;
-    $('slots-meter').value=capacity.used;
+    setValue('slots-usage',capacity.accountUsed===1?'1 of your bots is using a slot':capacity.accountUsed+' of your bots are using slots');
     setValue('slots-available',Math.max(0,capacity.total-capacity.used)+' shared platform slots available');
   }
   setValue('home-maintenance',price+' coins per bot every 24 hours · '+(workerAvailable?'Worker connected':'Worker unavailable'));
