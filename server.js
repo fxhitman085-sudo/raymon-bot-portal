@@ -25,6 +25,18 @@ function emailAddress(value){
   const mailbox=local.split('+')[0].replace(/\./g,'');
   return /^[a-z0-9]+$/.test(mailbox)?mailbox+'@gmail.com':null;
 }
+function optionalUsername(value){
+  if(value===undefined)return undefined;
+  const username=typeof value==='string'?value.trim().toLowerCase():'';
+  if(!/^[a-z0-9_]{3,24}$/.test(username))throw new PortalError(400,'Use 3–24 letters, numbers, or underscores for your username.');
+  return username;
+}
+function publicUrl(value){
+  try{
+    const url=new URL(value);
+    return url.protocol==='https:'&&!url.username&&!url.password?url.href:null;
+  }catch{return null;}
+}
 function createMailer(apiKey,from){
   if(!apiKey||!from)return null;
   return async({to,subject,text,id})=>{
@@ -78,7 +90,7 @@ async function body(req,limit=32768){
   try{return JSON.parse(Buffer.concat(parts));}catch{throw new PortalError(400,'Invalid JSON.');}
 }
 
-function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=false,sendMail=null}){
+function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=false,sendMail=null,links={}}){
   const base=new URL(origin), secure=base.protocol==='https:';
   if(!secure&&!['localhost','127.0.0.1'].includes(base.hostname))throw new Error('PUBLIC_ORIGIN must use HTTPS.');
   if(base.origin!==origin)throw new Error('PUBLIC_ORIGIN must be an origin without a trailing slash.');
@@ -110,12 +122,20 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
     running++;
     try{return await digest(password,salt);}finally{running--;}
   }
-  function finishAuth(res,session,user,status){
+  function finishAuth(res,session,user,status,remember=true){
     const token=random();
     store.logout(session);
     store.putSession(user.id,token);
-    res.setHeader('Set-Cookie',cookie(sessionName,token,604800));
+    res.setHeader('Set-Cookie',remember?cookie(sessionName,token,604800):cookie(sessionName,token,604800).replace('; Max-Age=604800',''));
     return json(res,status,store.dashboard(user));
+  }
+  async function reauthenticate(req,user,password,kind){
+    rateLimit(req,user.id,kind);
+    const email=emailAddress(user.email),saved=email&&store.password(email);
+    if(typeof password!=='string'||password.length>128)throw new PortalError(401,'Current password is incorrect.');
+    const encoded=await passwordWork(password,saved?.digest.split(':')[0]||dummySalt);
+    if(saved?.user_id!==user.id||!equal(encoded,saved.digest))throw new PortalError(401,'Current password is incorrect.');
+    return {email,digest:saved.digest};
   }
   const server=http.createServer(async(req,res)=>{
     res.setHeader('Cache-Control','no-store');
@@ -128,6 +148,7 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       const method=req.method, route=url.pathname;
       if(method==='GET'&&staticFiles.has(route)){
         const [file,type]=staticFiles.get(route);
+        if(file.endsWith('.jpg'))res.setHeader('Cache-Control','public, max-age=86400');
         res.writeHead(200,{'Content-Type':type});
         res.end(fs.readFileSync(path.join(__dirname,file)));
         return;
@@ -147,6 +168,8 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       const session=cookieValue(req,sessionName);
       const user=store.session(session);
       if(method==='GET'&&route==='/api/me')return json(res,200,user?store.dashboard(user):{user:null,recoveryAvailable:!!sendMail});
+      if(method==='GET'&&route==='/api/community')return json(res,200,{
+        announcements:store.announcements(),community:publicUrl(links.community),support:publicUrl(links.support)});
       if(method==='POST'&&req.headers.origin!==origin)throw new PortalError(403,'Request origin not allowed.');
       if(method==='POST'&&route==='/api/auth/forgot-password'){
         if(!sendMail)throw new PortalError(503,'Password recovery email is not configured. Contact the portal owner.');
@@ -173,25 +196,32 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
         return json(res,200,{ok:true});
       }
       if(method==='POST'&&['/api/auth/register','/api/auth/login'].includes(route)){
-        const data=await body(req), email=emailAddress(data?.email);
+        const data=await body(req);
         const registering=route.endsWith('/register');
-        if(!email)throw new PortalError(400,'Enter a valid email address.');
-        rateLimit(req,email,registering?'register':'login');
+        const identifier=typeof data?.email==='string'?data.email.trim().toLowerCase():'';
+        const email=emailAddress(identifier)||(!registering&&/^[a-z0-9_]{3,24}$/.test(identifier)?store.loginEmail(identifier):null);
+        if(!email&&(registering||!identifier||identifier.length>254))throw new PortalError(400,'Enter a valid email address.');
+        rateLimit(req,email||identifier,registering?'register':'login');
         if(registering){
           const name=typeof data.name==='string'?data.name.trim().slice(0,90):'';
           if(!name)throw new PortalError(400,'Enter your name.');
           const ownerAuthorized=typeof ownerSignupToken==='string'&&ownerSignupToken.length>=32&&equal(data.ownerToken,ownerSignupToken);
           if(email===OWNER_EMAIL&&!ownerAuthorized)throw new PortalError(403,'Enter the owner setup token to create this account.');
+          const username=optionalUsername(data.username);
+          const referral=typeof data.referral==='string'&&/^[a-f0-9]{16}$/.test(data.referral)?data.referral:null;
+          if(data.confirmation!==undefined&&data.confirmation!==data.password)throw new PortalError(400,'Passwords do not match.');
           const encoded=await passwordWork(newPassword(data.password));
-          return finishAuth(res,session,store.register({email,name,digest:encoded,ownerAuthorized}),201);
+          return finishAuth(res,session,store.register({email,name,digest:encoded,ownerAuthorized,username,referral}),201);
         }
         const password=data?.password;
         if(typeof password!=='string'||password.length>128)throw new PortalError(401,'Email or password is incorrect.');
-        const saved=store.password(email);
+        const saved=email&&store.password(email);
         const encoded=await passwordWork(password,saved?.digest.split(':')[0]||dummySalt);
         if(!saved||!equal(encoded,saved.digest)||store.password(email)?.digest!==saved.digest)
           throw new PortalError(401,'Email or password is incorrect.');
-        return finishAuth(res,session,store.user(saved.user_id),200);
+        const member=store.user(saved.user_id);
+        if(!member||member.closed_at)throw new PortalError(401,'Email or password is incorrect.');
+        return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
       if(method==='POST'&&route==='/api/auth/set-password'){
@@ -225,6 +255,49 @@ function createServer({store,origin,workerToken,ownerSignupToken,railwayProxy=fa
       }
       if(route==='/api/group-settings'&&method==='GET'){
         return json(res,200,store.groupResult(user.id,url.searchParams.get('bot'),url.searchParams.get('token')));
+      }
+      if(method==='POST'&&route==='/api/profile'){
+        const data=await body(req), username=optionalUsername(data?.username);
+        const name=typeof data?.name==='string'?data.name.trim():undefined;
+        if((data?.name!==undefined&&(name===undefined||!name||name.length>90))||
+          (data?.theme!==undefined&&!['dark','light'].includes(data.theme)))throw new PortalError(400,'Check your profile fields.');
+        return json(res,200,store.dashboard(store.updateProfile(user.id,{username,name,theme:data?.theme})));
+      }
+      if(method==='POST'&&route==='/api/auth/change-password'){
+        const data=await body(req);
+        const password=newPassword(data?.password);
+        if(data.confirmation!==password)throw new PortalError(400,'Passwords do not match.');
+        const saved=await reauthenticate(req,user,data.currentPassword,'change-password');
+        store.changePassword(user.id,saved.email,saved.digest,await passwordWork(password));
+        return finishAuth(res,session,store.user(user.id),200);
+      }
+      if(method==='POST'&&route==='/api/auth/close-account'){
+        const data=await body(req);
+        if(data?.confirmation!=='DELETE')throw new PortalError(400,'Type DELETE to confirm.');
+        const saved=await reauthenticate(req,user,data.password,'close-account');
+        store.closeAccount(user.id,saved.email,saved.digest);
+        res.setHeader('Set-Cookie',cookie(sessionName,'',0));
+        return json(res,200,{ok:true});
+      }
+      if(method==='GET'&&route==='/api/notifications')return json(res,200,{notices:store.notices(user)});
+      if(method==='POST'&&route==='/api/notifications'){
+        const data=await body(req);
+        store.updateNotice(user,data?.id,data?.action);
+        return json(res,200,{notices:store.notices(user)});
+      }
+      if(method==='GET'&&route==='/api/bot-events'){
+        const id=url.searchParams.get('deploymentId');
+        if(!id)throw new PortalError(400,'Select a bot.');
+        return json(res,200,{events:store.eventLogs(user.id,id)});
+      }
+      if(method==='POST'&&route==='/api/owner/announcements'){
+        if(!user.is_owner||user.banned)throw new PortalError(403,'Owner access required.');
+        const data=await body(req);
+        const title=typeof data?.title==='string'?data.title.trim():'';
+        const description=typeof data?.description==='string'?data.description.trim():'';
+        if(!title||title.length>90||!description||description.length>1600)throw new PortalError(400,'Enter a title and announcement.');
+        store.publishAnnouncement(user.id,title,description);
+        return json(res,201,{ok:true});
       }
       if(method==='POST'&&route==='/api/control'){
         const data=await body(req);
@@ -283,7 +356,8 @@ if(require.main===module){
   const origin=process.env.PUBLIC_ORIGIN||'http://localhost:3000';
   const sendMail=createMailer(process.env.RESEND_API_KEY,process.env.PORTAL_EMAIL_FROM);
   const server=createServer({store,origin,sendMail,
-    ownerSignupToken:process.env.OWNER_SIGNUP_TOKEN,workerToken:process.env.WORKER_TOKEN,railwayProxy:!!process.env.RAILWAY_SERVICE_ID});
+    ownerSignupToken:process.env.OWNER_SIGNUP_TOKEN,workerToken:process.env.WORKER_TOKEN,railwayProxy:!!process.env.RAILWAY_SERVICE_ID,
+    links:{community:process.env.PORTAL_COMMUNITY_URL,support:process.env.PORTAL_SUPPORT_URL}});
   const runWorker=process.env.PORTAL_RUN_WORKER==='1'||
     (!!process.env.RAILWAY_SERVICE_ID&&process.env.PORTAL_RUN_WORKER!=='0');
   if(runWorker&&process.env.RAILWAY_SERVICE_ID&&!workerPersistent)

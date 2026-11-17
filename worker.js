@@ -2,6 +2,7 @@ const fs=require('node:fs/promises');
 const path=require('node:path');
 const settings=require('./bot-settings');
 
+const PAIR_CODE_WAIT=75_000;
 const validId=value=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 function samePhone(jid,phone){
   return typeof jid==='string'&&jid.split('@')[1]==='s.whatsapp.net'&&jid.split('@')[0].split(':')[0]===phone.slice(1);
@@ -22,8 +23,9 @@ class Worker {
     const reports=[...this.entries.values()].map(e=>{
       const code=e.task.intent==='pair'&&e.task.pairUntil>now&&e.bot?.sock===e.codeSocket&&
         !e.bot?.socketClosed?e.code:null;
-      return {id:e.task.id,generation:e.task.generation,
-        status:e.failure||(e.verified&&e.bot?.connected?'online':code?'code':'connecting'),
+      const noCode=e.task.intent==='pair'&&!e.codeIssued&&!e.verified&&now-e.started>=PAIR_CODE_WAIT;
+      return {id:e.task.id,generation:e.task.generation,restart:e.task.restart,
+        status:e.failure||(noCode?'pair_no_code':e.verified&&e.bot?.connected?'online':code?'code':'connecting'),
         ...(code?{code}:{}),...(e.groupResult?{groups:e.groupResult}:{}),...(e.bot?.portalUpdates&&!e.failure?{settings:{
           appliedRevision:e.bot.db.get('portal.settingsRevision'),values:settings.read(e.bot)
         }}:{})};
@@ -44,7 +46,7 @@ class Worker {
       if(this.closed)return;
       for(const [id,entry] of this.entries){
         const task=tasks.get(id);
-        if(!task||task.generation!==entry.task.generation||entry.failure)await this.stopEntry(id,entry);
+        if(!task||task.generation!==entry.task.generation||task.restart!==entry.task.restart||entry.failure)await this.stopEntry(id,entry);
       }
       for(const task of tasks.values()){
         if(this.closed)return;
@@ -102,16 +104,11 @@ class Worker {
   async startEntry(task){
     const dir=path.join(this.root,task.id);
     const authDir=path.join(dir,'auth-'+task.generation);
-    const entry={task,verified:false,code:null};
+    const entry={task,verified:false,code:null,codeIssued:false,started:this.clock()};
     this.entries.set(task.id,entry);
     try{
       await fs.mkdir(dir,{recursive:true,mode:0o700});
-      if(task.intent==='pair'){
-        // Only this portal deployment's superseded auth attempts are cleaned up.
-        const files=await fs.readdir(dir);
-        for(const name of files)if(/^auth-[0-9a-f-]{36}$/.test(name)&&name!=='auth-'+task.generation)
-          await fs.rm(path.join(dir,name),{recursive:true,force:true});
-      }else{
+      if(task.intent==='run'){
         const creds=JSON.parse(await fs.readFile(path.join(authDir,'creds.json'),'utf8'));
         if(!creds.registered||!samePhone(creds.me?.id,task.phone)){
           entry.failure='needs_pairing';
@@ -132,7 +129,10 @@ class Worker {
       if(bot.portalUpdates&&task.settings)settings.apply(bot,task.settings);
       bot.onPairCode=async code=>{
         if(entry.task.intent==='pair'&&entry.task.pairUntil>this.clock()&&bot.sock&&!bot.socketClosed){
-          entry.code=String(code);
+          const normalized=String(code);
+          if(!/^[a-z0-9]{8}$/i.test(normalized)){entry.failure='pair_failed';return;}
+          entry.code=normalized;
+          entry.codeIssued=true;
           entry.codeSocket=bot.sock;
         }
       };
