@@ -89,7 +89,34 @@ class Store {
     this.db.exec(`CREATE TABLE IF NOT EXISTS bot_settings (
       deployment_id TEXT PRIMARY KEY REFERENCES deployments(id), revision TEXT,
       patch TEXT NOT NULL DEFAULT '{}', applied TEXT
-    )`);
+    );
+    CREATE TABLE IF NOT EXISTS portal_profiles (
+      user_id TEXT PRIMARY KEY REFERENCES users(id), username TEXT COLLATE NOCASE UNIQUE,
+      theme TEXT NOT NULL DEFAULT 'dark', referral_code TEXT NOT NULL UNIQUE,
+      referred_by TEXT REFERENCES users(id), closed_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS portal_events (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), deployment_id TEXT REFERENCES deployments(id),
+      title TEXT NOT NULL, description TEXT NOT NULL, created INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS portal_events_user ON portal_events(user_id,created DESC);
+    CREATE INDEX IF NOT EXISTS portal_events_deployment ON portal_events(deployment_id,created DESC);
+    CREATE TABLE IF NOT EXISTS portal_announcements (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, created INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS portal_notice_state (
+      user_id TEXT NOT NULL REFERENCES users(id), notice_id TEXT NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(user_id,notice_id)
+    );
+    CREATE TABLE IF NOT EXISTS portal_restart (
+      deployment_id TEXT PRIMARY KEY REFERENCES deployments(id), token TEXT NOT NULL, requested INTEGER NOT NULL
+    );
+    `);
+    this.tx(()=>{
+      for(const user of this.all('SELECT id FROM users WHERE id NOT IN (SELECT user_id FROM portal_profiles)')){
+        this.createProfile(user.id);
+      }
+    });
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
   all(sql,...params){return this.db.prepare(sql).all(...params);}
@@ -128,7 +155,8 @@ class Store {
   password(email){return this.get('SELECT user_id,digest FROM passwords WHERE email=?',email);}
   issuePasswordReset(email,token){
     return this.tx(()=>{
-      if(!this.password(email))return false;
+      const saved=this.password(email);
+      if(!saved||this.user(saved.user_id)?.closed_at)return false;
       const now=this.clock();
       this.run('DELETE FROM password_resets WHERE expires<=?',now);
       this.run('INSERT INTO password_resets VALUES (?,?,?)',hash(token),email,now+RESET_WINDOW);
@@ -150,7 +178,7 @@ class Store {
     });
   }
   hasPassword(userId){return !!this.get('SELECT 1 FROM passwords WHERE user_id=?',userId);}
-  register({email,name,digest,ownerAuthorized=false}){
+  register({email,name,digest,ownerAuthorized=false,username=null,referral=null}){
     return this.tx(()=>{
       const isOwner=email===OWNER_EMAIL;
       if(isOwner&&!ownerAuthorized)throw new PortalError(403,'The owner account requires its setup token.');
@@ -168,6 +196,10 @@ class Store {
         if(isOwner)this.run('INSERT INTO owner VALUES (1,?)',id);
       }
       this.run('INSERT INTO passwords VALUES (?,?,?)',email,id,digest);
+      if(!priorOwner){
+        this.createProfile(id,username,referral);
+        this.event(id,null,'Welcome to RAYMON BOT','Your account received 10 starter coins. Deploy a bot to get started.');
+      }else if(username)this.updateUsername(id,username);
       return this.user(id);
     });
   }
@@ -180,7 +212,93 @@ class Store {
       return user;
     });
   }
-  user(id){return this.get('SELECT u.*, EXISTS(SELECT 1 FROM owner WHERE user_id=u.id) AS is_owner FROM users u WHERE id=?',id);}
+  user(id){return this.get(`SELECT u.*,p.username,p.theme,p.referral_code,p.closed_at,
+    EXISTS(SELECT 1 FROM owner WHERE user_id=u.id) AS is_owner
+    FROM users u LEFT JOIN portal_profiles p ON p.user_id=u.id WHERE u.id=?`,id);}
+  createProfile(id,username=null,referral=null){
+    const ref=referral&&this.get('SELECT user_id FROM portal_profiles WHERE referral_code=? AND closed_at IS NULL',referral);
+    this.run('INSERT INTO portal_profiles (user_id,referral_code,referred_by) VALUES (?,?,?)',
+      id,hash('raymon-referral:'+id).slice(0,16),ref?.user_id||null);
+    if(username)this.updateUsername(id,username);
+  }
+  updateUsername(id,username){
+    const other=this.get('SELECT user_id FROM portal_profiles WHERE username=?',username);
+    if(other&&other.user_id!==id)throw new PortalError(409,'That username is already taken.');
+    this.run('UPDATE portal_profiles SET username=? WHERE user_id=?',username,id);
+  }
+  loginEmail(username){
+    return this.get(`SELECT p.email FROM portal_profiles f JOIN passwords p ON p.user_id=f.user_id
+      WHERE f.username=? AND f.closed_at IS NULL`,username)?.email||null;
+  }
+  updateProfile(id,{name,username,theme}){
+    return this.tx(()=>{
+      this.requireActive(id);
+      if(username!==undefined)this.updateUsername(id,username);
+      if(name!==undefined)this.run('UPDATE users SET name=? WHERE id=?',name,id);
+      if(theme!==undefined)this.run('UPDATE portal_profiles SET theme=? WHERE user_id=?',theme,id);
+      return this.user(id);
+    });
+  }
+  changePassword(id,email,oldDigest,newDigest){
+    this.tx(()=>{
+      this.requireActive(id);
+      const updated=this.run('UPDATE passwords SET digest=? WHERE email=? AND user_id=? AND digest=?',newDigest,email,id,oldDigest);
+      if(!updated.changes)throw new PortalError(409,'Your credentials changed. Try again.');
+      this.run('DELETE FROM sessions WHERE user_id=?',id);
+      this.run('DELETE FROM password_resets WHERE email=?',email);
+    });
+  }
+  closeAccount(id,email,oldDigest){
+    this.tx(()=>{
+      const user=this.requireActive(id);
+      if(user.is_owner)throw new PortalError(409,'The owner account is protected.');
+      const saved=this.password(email);
+      if(saved?.user_id!==id||saved.digest!==oldDigest)throw new PortalError(409,'Your credentials changed. Try again.');
+      for(const bot of this.deployments(id))this.cancel(bot);
+      this.run('UPDATE portal_profiles SET closed_at=? WHERE user_id=?',this.clock(),id);
+      this.run('UPDATE users SET banned=1 WHERE id=?',id);
+      this.run('DELETE FROM sessions WHERE user_id=?',id);
+      this.run('DELETE FROM password_resets WHERE email=?',email);
+    });
+  }
+  event(userId,deploymentId,title,description){
+    this.run('INSERT INTO portal_events VALUES (?,?,?,?,?,?)',randomUUID(),userId,deploymentId,title,description,this.clock());
+  }
+  eventLogs(id,botId){
+    this.requireActive(id);
+    const bot=this.deployment(id,botId);
+    if(!bot)throw new PortalError(404,'Bot not found.');
+    return this.all(`SELECT title,description,created FROM portal_events
+      WHERE user_id=? AND deployment_id=? ORDER BY created DESC,rowid DESC LIMIT 50`,id,bot.id);
+  }
+  announcements(){
+    return this.all('SELECT id,title,description,created FROM portal_announcements ORDER BY created DESC,rowid DESC LIMIT 30');
+  }
+  publishAnnouncement(id,title,description){
+    const user=this.requireActive(id);
+    if(!user.is_owner)throw new PortalError(403,'Owner access required.');
+    this.run('INSERT INTO portal_announcements VALUES (?,?,?,?)',randomUUID(),title,description,this.clock());
+  }
+  notices(user){
+    const entries=this.all(`SELECT id,title,description,created FROM portal_events WHERE user_id=?
+      UNION ALL SELECT 'billing:'||id,'Bot maintenance charge',reason||' ('||delta||' coins)',created
+      FROM ledger WHERE user_id=? AND kind='uptime'
+      UNION ALL SELECT 'announcement:'||id,title,description,created FROM portal_announcements
+      WHERE created>=? ORDER BY created DESC LIMIT 80`,user.id,user.id,user.created);
+    for(const bot of this.deployments(user.id)){
+      if(this.lowBalance(bot,user))entries.unshift({id:'low:'+bot.id+':'+bot.paid_until,title:'Low coin balance',
+        description:'Add coins before your next bot renewal.',created:bot.paid_until-LOW_BALANCE_WINDOW});
+    }
+    const states=new Map(this.all('SELECT notice_id,dismissed FROM portal_notice_state WHERE user_id=?',user.id)
+      .map(row=>[row.notice_id,row.dismissed]));
+    return entries.filter(row=>states.get(row.id)!==1).map(row=>({...row,read:states.has(row.id)}));
+  }
+  updateNotice(user,id,action){
+    if(!['read','dismiss'].includes(action)||!this.notices(user).some(row=>row.id===id))
+      throw new PortalError(404,'Notification not found.');
+    this.run(`INSERT INTO portal_notice_state VALUES (?,?,?) ON CONFLICT(user_id,notice_id)
+      DO UPDATE SET dismissed=MAX(dismissed,excluded.dismissed)`,user.id,id,Number(action==='dismiss'));
+  }
   putSession(id,token){
     const now=this.clock();
     this.run('DELETE FROM sessions WHERE expires<=?',now);
@@ -189,7 +307,8 @@ class Store {
   session(token){
     if(!token||token.length>100)return null;
     const row=this.get('SELECT user_id FROM sessions WHERE token=? AND expires>?',hash(token),this.clock());
-    return row?this.user(row.user_id):null;
+    const user=row&&this.user(row.user_id);
+    return user&&!user.closed_at?user:null;
   }
   logout(token){if(token)this.run('DELETE FROM sessions WHERE token=?',hash(token));}
   deployments(userId){return this.all("SELECT * FROM deployments WHERE user_id=? AND state<>'cancelled' ORDER BY requested,id",userId);}
@@ -224,6 +343,7 @@ class Store {
         pair_until=excluded.pair_until,requested=excluded.requested,last_seen=0`,botId,userId,phone,generation,now+PAIR_WINDOW,now);
       if(settings!==undefined)this.queueSettings(botId,settings);
       this.codes.delete(botId);
+      this.event(userId,botId,'Pairing requested','Waiting for a pairing code from WhatsApp.');
     });
   }
   queueSettings(id,input){
@@ -295,6 +415,7 @@ class Store {
     if(d.verified_phone)this.run('DELETE FROM verified_numbers WHERE phone=? AND user_id=?',d.verified_phone,d.user_id);
     this.run("UPDATE deployments SET intent='pause',state='cancelled',linked=0,pair_until=0,verified_phone=NULL WHERE id=?",d.id);
     this.codes.delete(d.id);
+    this.event(d.user_id,d.id,'Deployment cancelled','This deployment was removed from your active list.');
   }
   control(userId,action,id){
     return this.tx(()=>{
@@ -305,6 +426,16 @@ class Store {
       }else if(action==='pause'){
         this.run("UPDATE deployments SET intent='pause',state='paused',pair_until=0 WHERE id=?",d.id);
         this.codes.delete(d.id);
+        if(d.intent!=='pause')this.event(userId,d.id,'Bot paused','The deployment was paused from the portal.');
+      }else if(action==='restart'){
+        if(!d.linked||d.intent!=='run')throw new PortalError(409,'Start the linked bot before restarting it.');
+        if(d.paid_until<=now&&user.coins<PRICE)throw new PortalError(409,'Your bot needs coins before it can restart.');
+        const prior=this.get('SELECT requested FROM portal_restart WHERE deployment_id=?',d.id);
+        if(prior&&prior.requested+15_000>now)throw new PortalError(429,'A restart was requested recently.');
+        this.run(`INSERT INTO portal_restart VALUES (?,?,?) ON CONFLICT(deployment_id)
+          DO UPDATE SET token=excluded.token,requested=excluded.requested`,d.id,randomUUID(),now);
+        this.run("UPDATE deployments SET state='connecting',last_seen=0 WHERE id=?",d.id);
+        this.event(userId,d.id,'Restart requested','The worker will reconnect this deployment with its saved session.');
       }else if(action==='resume'){
         if(!d.linked)throw new PortalError(409,'You need to pair your WhatsApp again.');
         if(d.paid_until<=now&&user.coins<PRICE)throw new PortalError(409,'You need at least 10 coins to resume.');
@@ -320,7 +451,7 @@ class Store {
     return this.tx(()=>{
       const actor=this.requireActive(actorId), target=this.user(targetId);
       if(!actor.is_owner)throw new PortalError(403,'Owner access required.');
-      if(!target)throw new PortalError(404,'User not found.');
+      if(!target||target.closed_at)throw new PortalError(404,'User not found.');
       if(action==='cancel'){
         const d=typeof deploymentId==='string'&&this.deployment(targetId,deploymentId);
         if(!d)throw new PortalError(404,'Bot not found.');
@@ -373,7 +504,7 @@ class Store {
     const now=this.clock();
     const deployments=this.deployments(user.id).map(d=>{
       const code=this.codes.get(d.id);
-      return {id:d.id,phone:d.phone,state:this.state(d,user,now),linked:!!d.linked,settings:this.settingsView(d.id),paidUntil:d.paid_until||null,
+      return {id:d.id,phone:d.phone,requested:d.requested||null,state:this.state(d,user,now),linked:!!d.linked,settings:this.settingsView(d.id),paidUntil:d.paid_until||null,
         nextRenewal:d.intent==='run'&&d.linked&&d.paid_until>now&&!user.banned?d.paid_until:null,
         lowBalanceAlert:this.lowBalance(d,user,now),
         workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
@@ -381,24 +512,38 @@ class Store {
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&code.expires>now&&!user.banned?code.value:null};
     });
-    return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
+    const {used}=this.get(`SELECT COUNT(*) AS used FROM deployments d JOIN users u ON u.id=d.user_id
+      WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
+      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,now,now,PRICE);
+    return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
+      username:user.username,theme:user.theme||'dark',created:user.created,referralCode:user.referral_code,
+      banned:!!user.banned,needsPassword:!this.hasPassword(user.id)},capacity:{used,total:this.maxBots},
+      unread:this.notices(user).filter(row=>!row.read).length,workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
+      deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
   ownerData(search='',id){
     const q='%'+search.toLowerCase().slice(0,100)+'%';
-    const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned FROM users u
+    const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned,p.closed_at FROM users u LEFT JOIN portal_profiles p ON p.user_id=u.id
       WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? OR EXISTS
       (SELECT 1 FROM deployments d WHERE d.user_id=u.id AND d.state<>'cancelled' AND d.phone LIKE ?)
       ORDER BY u.created DESC LIMIT 100`,q,q,q);
     const bots=this.all("SELECT id,phone,intent,state,paid_until,pair_until,last_seen FROM deployments WHERE user_id=? AND state<>'cancelled' ORDER BY requested,id",id||'');
     const selected=id?this.user(id):null;
     const deployments=selected?bots.map(d=>({id:d.id,phone:d.phone,state:this.state(d,selected)})):[];
-    return {users,deployments,history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
+    const stats=this.get(`SELECT (SELECT count(*) FROM users) AS users,
+      (SELECT count(*) FROM deployments WHERE state<>'cancelled') AS deployments,
+      (SELECT count(*) FROM deployments WHERE state='online' AND last_seen>?) AS online,
+      (SELECT count(*) FROM ledger WHERE kind='uptime') AS charges`,this.clock()-12_000);
+    return {stats,users,deployments,history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
   }
   sync(reports){
     const now=this.clock();
     for(const [id,code] of this.codes)if(code.expires<=now)this.codes.delete(id);
     const deployments=this.tx(()=>{
+      for(const d of this.all("SELECT id,user_id FROM deployments WHERE intent='pair' AND pair_until<=?",now)){
+        this.event(d.user_id,d.id,'Pairing expired','Request a fresh code to continue.');
+      }
       this.run("UPDATE deployments SET intent='pause',state='expired' WHERE intent='pair' AND pair_until<=?",now);
       for(const [id,task] of this.groupRequests)if(task.expires<=now)this.groupRequests.delete(id);
       for(const report of reports)this.report(report,now);
@@ -409,7 +554,9 @@ class Store {
       return active.map(d=>{
         const settings=this.get('SELECT revision,patch FROM bot_settings WHERE deployment_id=?',d.id);
         const groups=this.groupRequests.get(d.id);
+        const restart=this.get('SELECT token FROM portal_restart WHERE deployment_id=?',d.id)?.token;
         return {id:d.id,phone:d.phone,generation:d.generation,intent:d.intent,
+          ...(restart?{restart}:{}),
           pairUntil:d.pair_until,permitUntil:d.paid_until>now?Math.min(d.paid_until,now+12_000):0,
           ...(groups&&!groups.result&&groups.generation===d.generation?{groups}:{}),
           ...(settings?.revision?{settings:{revision:settings.revision,patch:JSON.parse(settings.patch)}}:{})};
@@ -422,6 +569,8 @@ class Store {
     if(!r||typeof r.id!=='string'||typeof r.generation!=='string')return;
     const d=this.get('SELECT * FROM deployments WHERE id=? AND generation=?',r.id,r.generation);
     if(!d||d.intent==='pause')return;
+    const restart=this.get('SELECT token FROM portal_restart WHERE deployment_id=?',d.id)?.token;
+    if(restart&&r.restart!==restart)return;
     const user=this.user(d.user_id);
     if(!user||user.banned)return;
     this.reportSettings(d.id,r.settings);
@@ -433,13 +582,20 @@ class Store {
     if(r.status==='code'&&d.intent==='pair'&&/^[A-Z0-9]{8}$/i.test(r.code||'')){
       this.codes.set(d.id,{generation:d.generation,value:r.code,expires:Math.min(d.pair_until,now+PAIRING_REPORT_TTL)});
       this.run("UPDATE deployments SET state='awaiting_code' WHERE id=?",d.id);
-    }else if(['needs_pairing','pair_failed'].includes(r.status)){
+    }else if(['needs_pairing','pair_failed','pair_no_code'].includes(r.status)){
       this.codes.delete(d.id);
+      const detail={
+        pair_no_code:'WhatsApp did not issue a code in time. Request a fresh code.',
+        pair_failed:'The worker could not finish pairing. Try a fresh code.',
+        needs_pairing:'The saved WhatsApp session needs to be linked again.'
+      };
+      this.event(d.user_id,d.id,'WhatsApp connection failed',detail[r.status]);
       this.run("UPDATE deployments SET intent='pause',state=?,linked=0,pair_until=0 WHERE id=?",r.status,d.id);
     }else if(r.status==='connecting'&&d.intent==='pair'){
       this.codes.delete(d.id);
       if(d.state==='awaiting_code')this.run("UPDATE deployments SET state='queued' WHERE id=?",d.id);
     }else if(r.status==='connecting'&&d.intent==='run'){
+      if(d.state==='online')this.event(d.user_id,d.id,'Connection interrupted','The worker is attempting to reconnect.');
       this.run("UPDATE deployments SET state='connecting' WHERE id=?",d.id);
     }else if(r.status==='online'){
       if(d.intent==='pair'){
@@ -454,6 +610,7 @@ class Store {
         this.run('UPDATE deployments SET verified_phone=? WHERE id=?',d.phone,d.id);
       }
       this.codes.delete(d.id);
+      if(d.state!=='online')this.event(d.user_id,d.id,'Bot connected','WhatsApp confirmed the deployment is connected.');
       let paidUntil=d.paid_until;
       if(paidUntil<=now&&user.coins>=PRICE){
         this.credit(user.id,-PRICE,'uptime','24 hours of bot access');

@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0c1010">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050505">
   <meta name="description" content="Link WhatsApp to RAYMON BOT and manage your bot, pairing and coins in one dashboard.">
   <title>RAYMON BOT — WhatsApp Dashboard</title>
   <link rel="stylesheet" href="/style.css">
@@ -11,29 +11,42 @@
 </head>
 <body>
   <header class="top"><div class="shell nav">
+    <button id="open-menu" class="icon-button menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <a class="brand" href="/" aria-label="RAYMON BOT home"><span class="mark" aria-hidden="true">R</span><span>RAYMON<span class="brand-bot"> BOT</span></span></a>
-    <span class="nav-note"><span class="dot"></span> WHATSAPP BOT PORTAL</span>
-    <button id="sign-out" class="button subtle" type="button" hidden>Sign out</button>
+    
+    <div class="actions">
+      <a id="sign-in-link" class="button quiet" href="#account">Sign in</a>
+      <button id="notifications-button" class="icon-button" type="button" aria-label="Notifications" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0"/></svg><span id="unread-count" hidden></span></button>
+      <button id="avatar-button" class="avatar avatar-small" type="button" aria-label="My profile" hidden></button>
+    </div>
   </div></header>
   <main class="shell">
     <p id="notice" class="notice" role="status" hidden></p>
     <section id="landing" class="landing">
-      <div class="hero">
-        <img class="hero-art" src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536">
-        <h1>Your WhatsApp.<br><em>Your bot.</em></h1>
-        <p class="intro">Link your number, start RAYMON BOT and manage your time from one private dashboard.</p>
-        <p class="small first">Your first 24 hours are covered by 10 free coins.</p>
+      <div id="landing-hero" class="hero">
+        <p class="hero-kicker">RAYMON BOT — NEXT GENERATION</p>
+        <h1>The Future of <span>WhatsApp Automation</span> Starts Here</h1>
+        <p class="intro">Deploy, customize, and manage powerful WhatsApp bots through one intelligent hosting platform.</p>
+        <div class="hero-actions"><button id="deploy-cta" class="button primary" type="button">Get Started Free</button>
+          <button id="hero-login" class="button subtle" type="button">Login Here</button></div>
+        <p class="landing-price">Start with 10 free coins. Hosting costs 10 coins per bot every 24 hours.</p>
       </div>
-      <div class="feature auth-card">
-        <div class="feature-head"><span class="dot"></span><span>YOUR PORTAL ACCOUNT</span></div>
+      <div id="account" class="feature auth-card" hidden>
+        <a href="#" id="auth-back" class="button quiet">Back to home</a>
+        <div class="auth-emblem"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3 8-11V5l-8-3-8 3v6c0 8 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h1 id="auth-heading">Welcome Back</h1>
+        <p class="auth-description">Sign in to manage your RAYMON BOT experience.</p>
         <div class="tabs auth-tabs" aria-label="Account options">
           <button id="auth-login" class="button subtle selected" type="button" aria-pressed="true">Sign in</button>
           <button id="auth-register" class="button subtle" type="button" aria-pressed="false">Create account</button>
         </div>
         <form id="auth-form" method="post" action="/api/auth/login">
           <div id="auth-name-field" hidden><label for="auth-name">Name</label><input id="auth-name" autocomplete="name" maxlength="90" disabled></div>
-          <div><label for="auth-email">Email address</label><input id="auth-email" type="email" autocomplete="username" inputmode="email" maxlength="254" required placeholder="you@example.com"></div>
-          <div><label for="auth-password">Password</label><input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required></div>
+          <div id="auth-username-field" hidden><label for="auth-username">Username</label><input id="auth-username" autocomplete="username" pattern="[A-Za-z0-9_]{3,24}" maxlength="24" disabled></div>
+          <div><label id="auth-email-label" for="auth-email">Username or email</label><input id="auth-email" type="text" autocomplete="username" maxlength="254" required></div>
+          <div><label for="auth-password">Password</label><div class="password-input"><input id="auth-password" type="password" autocomplete="current-password" maxlength="128" required><button class="button quiet" id="toggle-password" type="button" aria-pressed="false">Show</button></div></div>
+          <div id="auth-confirm-field" hidden><label for="auth-confirm">Confirm password</label><input id="auth-confirm" type="password" autocomplete="new-password" maxlength="128" disabled></div>
+          <label id="remember-field" class="remember"><input id="remember-session" type="checkbox" checked> Remember session</label>
           <p id="auth-password-hint" class="small" hidden>Use at least 12 characters.</p>
           <details id="auth-owner" hidden>
             <summary>Setting up the owner account?</summary>
@@ -56,11 +69,41 @@
         </form>
       </div>
     </section>
-    <section id="dashboard" hidden>
-      <div class="desk-head">
-        <div><p class="eyebrow">YOUR CONTROL CENTER</p><h1 id="greeting" class="dash-title">Dashboard</h1><p class="muted" id="account-email"></p></div>
-        <div class="tabs" aria-label="Dashboard views"><button id="view-bot" class="button subtle selected" type="button">My bots</button><button id="view-owner" class="button subtle" type="button" hidden>Owner dashboard</button></div>
+    <section id="landing-features" aria-labelledby="features-heading" hidden>
+      <h2 id="features-heading">Manage your bots in one place</h2>
+      <div class="feature-grid">
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 13h.01M15 13h.01M9 17h6M2 11v5m20-5v5"/></svg><h3>Intelligent WhatsApp Automation</h3><p>Manage automatic replies and supported bot commands.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 10-12h-7z"/></svg><h3>Fast Bot Deployment</h3><p>Connect WhatsApp with a pairing code from your dashboard.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3 8-11V5l-8-3-8 3v6c0 8 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg><h3>Secure Session Management</h3><p>Manage your linked sessions from your own account.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-7 4 14 3-7h5"/></svg><h3>Real-Time Monitoring</h3><p>Check which bots are online, reconnecting, or paused.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg><h3>Advanced Bot Customization</h3><p>Set prefixes, status reactions, and away replies.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="6" rx="2"/><rect x="3" y="13" width="18" height="6" rx="2"/><path d="M7 8h.01M7 16h.01"/></svg><h3>Reliable Hosting Infrastructure</h3><p>View deployment status and upcoming renewals.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><h3>Account Security</h3><p>Control your profile, password, and active access.</p></article>
+        <article class="panel"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 6-6 6 6 6m8-12 6 6-6 6"/></svg><h3>Developer-Friendly Management</h3><p>Review deployment events and manage bots in one place.</p></article>
       </div>
+    </section>
+    <button id="drawer-overlay" aria-label="Close navigation" type="button" hidden></button>
+    <nav id="public-menu" class="workspace-nav" aria-label="Main navigation" hidden>
+      <div class="drawer-title"><strong>RAYMON BOT</strong><button id="close-public-menu" class="icon-button" type="button" aria-label="Close navigation"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></div>
+      <a id="public-home" class="nav-item" href="#">Home</a>
+      <button id="public-login" class="nav-item" type="button">Login</button>
+      <button id="public-signup" class="nav-item" type="button">Get Started Free</button>
+    </nav>
+    <section id="dashboard" hidden>
+      <nav id="workspace-nav" class="workspace-nav" aria-label="Workspace">
+        <div class="drawer-title"><strong>RAYMON BOT</strong><button id="close-menu" class="icon-button" type="button" aria-label="Close navigation"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></div>
+        <div class="workspace-account"><strong id="greeting">Account</strong><span id="account-email"></span></div>
+        <button id="view-home" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</button>
+        <button id="view-bot" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 13h.01M15 13h.01M9 17h6M2 11v5m20-5v5"/></svg>My Bots</button>
+        <button id="view-deploy" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 10-12h-7z"/></svg>Deploy Bot</button>
+        <button id="view-wallet" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V5H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7m19 6h-5a2 2 0 1 0 0 4h5"/></svg>My Coins</button>
+        <button id="view-buy" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h2l3 11h11l2-8H6m3 13h.01m9 0h.01"/></svg>Buy Coins</button>
+        <button id="view-community" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg>Community</button>
+        <button id="view-profile" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>My Profile</button>
+        <button id="view-owner" class="nav-item" type="button" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3 8-11V5l-8-3-8 3v6c0 8 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg>Admin</button>
+        <button id="sign-out" class="nav-item signout" type="button">Sign out</button>
+      </nav>
+      <div class="workspace-content">
       <article id="password-setup" class="panel password-setup" hidden>
         <h2>Set a password for this account</h2>
         <p class="muted">Use a new password of at least 12 characters to keep your existing account and coin balance.</p>
@@ -70,33 +113,62 @@
           <button class="button primary" type="submit">Save password</button>
         </form>
       </article>
-      <div id="bot-view">
-        <div class="metrics">
-          <article class="metric"><p>COIN BALANCE</p><strong id="balance">0</strong><span>coins available</span></article>
-          <article class="metric"><p>SELECTED BOT</p><strong id="bot-state" class="medium">Not linked</strong><span id="bot-phone">No WhatsApp number</span></article>
-          <article class="metric"><p>NEXT RENEWAL</p><strong id="paid-until" class="medium">—</strong><span id="renewal-detail">10 coins per 24 hours</span></article>
+      <section id="home-view">
+        <div class="dashboard-welcome">
+          <h1 id="home-heading" tabindex="-1">Welcome Back</h1>
+          <p class="muted">Manage your bots, monitor activity, and control your hosting experience.</p>
+          <div class="actions">
+            <button id="dashboard-wallet" class="button subtle" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V5H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7m19 6h-5a2 2 0 1 0 0 4h5"/></svg> <span id="home-wallet"></span></button>
+            <button id="dashboard-deploy" class="button primary" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 10-12h-7z"/></svg> Deploy Bot</button>
+          </div>
         </div>
-        <section class="bot-fleet panel" aria-labelledby="bots-heading">
-          <div class="owner-head"><h2 id="bots-heading">Your bots</h2><button id="add-bot" class="button primary" type="button">Add WhatsApp bot</button></div>
+        <div class="stats-grid" aria-label="Account statistics">
+          <article class="stat panel"><span>Total Bots</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 13h.01M15 13h.01M9 17h6M2 11v5m20-5v5"/></svg><strong id="total-bots">0</strong></article>
+          <article class="stat panel"><span>Active Bots</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-7 4 14 3-7h5"/></svg><strong id="active-bots">0</strong></article>
+          <article class="stat panel"><span>Inactive Bots</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="6" rx="2"/><rect x="3" y="13" width="18" height="6" rx="2"/><path d="M7 8h.01M7 16h.01"/></svg><strong id="inactive-bots">0</strong></article>
+          <article class="stat panel"><span>Coin Balance</span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V5H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7m19 6h-5a2 2 0 1 0 0 4h5"/></svg><strong id="home-coins">0</strong></article>
+        </div>
+        <div class="dashboard-details">
+          <article class="panel"><h2>Bot Slots</h2><p id="slots-usage" class="muted"></p><progress id="slots-meter" aria-label="Shared platform bot slots in use"></progress><p id="slots-available" class="small"></p></article>
+          <article class="panel"><h2>Maintenance Cost</h2><p id="home-maintenance" class="muted"></p><p id="home-renewal" class="small"></p></article>
+        </div>
+        <p id="dashboard-low-balance" class="notice" role="status" hidden></p>
+        <article id="dashboard-empty" class="panel empty-dashboard"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 7V3M9 13h.01M15 13h.01M9 17h6M2 11v5m20-5v5"/></svg><h2>No Bots Deployed Yet</h2><p>Your hosting journey starts here. Deploy your first WhatsApp bot in minutes.</p><button id="first-deploy" class="button primary" type="button">Deploy Your First Bot</button></article>
+        <article class="panel referral-panel"><h2>Referral Program</h2><p class="muted">Share your invitation link.</p><div class="copy-row"><input id="home-referral" aria-label="Referral link" readonly><button class="button subtle copy-referral" type="button">Copy</button></div></article>
+      </section>
+      <div id="bot-view">
+        <section id="deployments-view" aria-labelledby="bots-heading">
+          <div class="page-heading">
+            <h1 id="bots-heading" tabindex="-1">My bots</h1>
+            <button id="add-bot" class="button primary" type="button"><span aria-hidden="true">+</span> Add bot</button>
+          </div>
+          <p id="low-balance-alert" class="notice" role="status" hidden></p>
           <div id="bot-list" class="bot-list"></div>
         </section>
-        <p id="low-balance-alert" class="notice" role="status" hidden></p>
-        <div class="panels">
-          <article class="panel">
-            <img id="link-art" class="link-art" src="/raymon-brand.jpg" alt="RAYMON BOT" width="1536" height="1536">
-            <p class="eyebrow">CONNECTION</p><h2 id="connection-title">Link WhatsApp</h2>
+        <section id="manage-view" aria-labelledby="manage-title" hidden>
+          <button id="back-to-bots" class="button quiet back" type="button"><span class="back-icon" aria-hidden="true"></span> My bots</button>
+          <div class="page-heading manage-heading">
+            <h1 id="manage-title" tabindex="-1">Manage bot</h1>
+            <span id="bot-state" class="bot-status"></span>
+          </div>
+          <article id="connection-panel" class="panel connection-panel">
+            <div id="connection-head" class="connection-head">
+              <h2 id="connection-title">Link WhatsApp</h2>
+              <div id="bot-renewal" class="connection-renewal" hidden><span>Next renewal</span><strong id="paid-until">—</strong><small id="renewal-detail"></small></div>
+            </div>
+            <p id="deploy-description" class="muted" hidden>Connect your WhatsApp account and launch your bot through our secure deployment system.</p>
             <p id="connection-info" class="muted">Use a WhatsApp account you control.</p>
             <p id="connection-diagnostics" class="small" hidden></p>
             <form id="pair-form">
-              <div id="number-step"><label for="phone">WhatsApp number</label>
-              <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="24" placeholder="+234 800 000 0000" required>
+              <div id="number-step"><div class="phone-fields"><div><label for="country-code">Country code</label><input id="country-code" type="tel" inputmode="tel" autocomplete="tel-country-code" maxlength="5" placeholder="+234"></div>
+              <div><label for="phone">WhatsApp number</label><input id="phone" name="phone" type="tel" autocomplete="tel-national" inputmode="tel" maxlength="24" placeholder="800 000 0000" required></div></div>
               <button class="button primary" type="submit">Continue</button></div>
               <div id="customize-step" hidden>
                 <h3>Customize your bot</h3>
                 <p id="setup-number" class="small"></p>
                 <div id="setup-settings"></div>
                 <div class="actions">
-                  <button class="button primary" type="submit">Get pairing code</button>
+                  <button class="button primary" type="submit">Generate Pairing Code</button>
                   <button id="skip-settings" class="button subtle" type="button">Use defaults</button>
                   <button id="back-number" class="button subtle" type="button">Edit number</button>
                 </div>
@@ -108,8 +180,8 @@
               <p class="muted">In WhatsApp, open <b>Linked devices → Link a device → Link with phone number instead</b>. Enter the code there. Keep it private.</p>
               <p id="expires" class="small"></p>
             </div>
-            <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
-            <details id="bot-settings-panel" class="settings-panel" hidden>
+          </article>
+            <details id="bot-settings-panel" class="panel settings-panel" hidden>
               <summary>Settings</summary>
               <p id="settings-status" class="small" role="status"></p>
               <form id="edit-settings-form">
@@ -130,10 +202,22 @@
                 </form>
               </details>
             </details>
-            <button class="button subtle" id="cancel-bot" type="button" hidden>Cancel bot</button>
-          </article>
-          <article class="panel">
-            <p class="eyebrow">WALLET</p><h2>Coin activity</h2>
+          <div id="bot-access" class="access-panel" hidden>
+            <h2>Bot access</h2>
+            <div class="actions" id="bot-actions" hidden><button class="button primary" id="resume" type="button">Resume bot</button><button class="button subtle" id="pause" type="button">Pause bot</button></div>
+            <button class="button subtle" id="restart-bot" type="button" hidden>Restart bot</button>
+            <button class="button subtle" id="event-logs" type="button">View logs</button>
+            <button class="button subtle" id="cancel-bot" type="button">Delete deployment</button>
+          </div>
+        </section>
+      </div>
+      <section id="wallet-view" aria-labelledby="wallet-heading" hidden>
+        <div class="page-heading"><h1 id="wallet-heading" tabindex="-1">My Coins</h1></div>
+        <div class="wallet-grid">
+          <article class="panel wallet-balance">
+            <span>Available balance</span>
+            <h2><strong id="balance">0</strong> <small>coins</small></h2>
+            <p class="muted">10 coins per bot every 24 hours</p><p id="wallet-renewal" class="small"></p><button id="wallet-buy" class="button primary" type="button">Buy Coins</button>
             <details id="transfer-panel">
               <summary>Send coins</summary>
               <form id="transfer-form">
@@ -148,13 +232,64 @@
                 <div class="actions"><button id="confirm-transfer" class="button primary" type="button">Confirm transfer</button><button id="edit-transfer" class="button subtle" type="button">Edit</button></div>
               </div>
             </details>
+          </article>
+          <article class="panel wallet-activity">
+            <h2>Activity</h2>
             <ul id="history" class="history"></ul>
           </article>
         </div>
-      </div>
-      <section id="owner-view" class="panel" hidden>
-        <div class="owner-head"><div><p class="eyebrow">OWNER ACCESS</p><h2>Manage accounts</h2><p class="muted">Adjust balances, review activity and manage access.</p></div>
+      </section>
+      <section id="buy-view" hidden>
+        <article class="panel coming-soon"><div class="auth-emblem"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V5H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7m19 6h-5a2 2 0 1 0 0 4h5"/></svg></div><h1 id="buy-heading" tabindex="-1">Buy Coins</h1><h2>COMING SOON 🚀</h2>
+        <p>We're preparing a secure and convenient way to purchase coins. Stay tuned for future updates.</p>
+        <button class="button primary" id="buy-back" type="button">Back to Dashboard</button></article>
+      </section>
+      <section id="community-view" hidden>
+        <div class="page-heading"><h1 id="community-heading" tabindex="-1">Community</h1></div>
+        <div class="actions community-links"><a class="button primary" id="community-link" target="_blank" rel="noopener noreferrer" hidden>Join the community</a><button id="community-support" class="button subtle" type="button">Support</button></div>
+        <article class="panel"><h2>Official announcements</h2><div id="community-feed" class="event-list"></div></article>
+      </section>
+      <section id="profile-view" hidden>
+        <div class="profile-header panel"><span id="profile-avatar" class="avatar"></span><h1 id="profile-heading" tabindex="-1">My Profile</h1><p id="profile-email" class="muted"></p><p id="profile-status" class="small"></p></div>
+        <div class="profile-metrics">
+          <article class="panel"><span>Balance</span><strong id="profile-balance"></strong></article>
+          <article class="panel"><span>Referral Code</span><strong id="profile-code"></strong></article>
+          <article class="panel"><span>Member Since</span><strong id="profile-since"></strong></article>
+        </div>
+        <nav class="profile-tabs" aria-label="Profile sections">
+          <button class="button" data-profile-tab="information" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><span>Profile Information</span></button>
+          <button class="button" data-profile-tab="security" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3 8-11V5l-8-3-8 3v6c0 8 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg><span>Account Security</span></button>
+          <button class="button" data-profile-tab="appearance" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg><span>Appearance</span></button>
+          <button class="button" data-profile-tab="danger" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg><span>Danger Zone</span></button>
+        </nav>
+        <article id="profile-information" class="panel profile-panel"><h2>Profile Information</h2>
+          <form id="profile-form"><label for="profile-name">Display Name</label><input id="profile-name" autocomplete="name" maxlength="90" required>
+          <label for="profile-username">Username</label><input id="profile-username" autocomplete="username" maxlength="24" pattern="[A-Za-z0-9_]{3,24}">
+          <label for="profile-address">Email</label><input id="profile-address" readonly>
+          <label for="profile-referral">Referral Link</label><div class="copy-row"><input id="profile-referral" readonly><button class="button subtle copy-referral" type="button">Copy</button></div>
+          <button class="button primary" type="submit">Save Changes</button></form></article>
+        <article id="profile-security" class="panel profile-panel" hidden><h2>Account Security</h2>
+          <form id="password-change-form"><label for="password-current">Current Password</label><input id="password-current" type="password" autocomplete="current-password" required maxlength="128">
+          <label for="password-new">New Password</label><input id="password-new" type="password" autocomplete="new-password" required minlength="12" maxlength="128">
+          <label for="password-confirm">Confirm New Password</label><input id="password-confirm" type="password" autocomplete="new-password" required minlength="12" maxlength="128">
+          <button class="button primary" type="submit">Change Password</button></form></article>
+        <article id="profile-appearance" class="panel profile-panel" hidden><h2>Appearance</h2>
+          <form id="appearance-form"><label for="theme-select">Color theme</label><select id="theme-select"><option value="dark">Dark Mode</option><option value="light">Light Mode</option></select><button type="submit" class="button primary">Save Appearance</button></form></article>
+        <article id="profile-danger" class="panel profile-panel danger-panel" hidden><h2>Danger Zone</h2>
+          <p id="close-account-info">Closing your account ends access, cancels your deployments, and stops future deductions. Billing records and session files are retained.</p>
+          <form id="close-account-form"><label for="close-password">Current Password</label><input id="close-password" type="password" autocomplete="current-password" required maxlength="128">
+          <label for="close-confirm">Type DELETE to confirm</label><input id="close-confirm" pattern="DELETE" autocomplete="off" required>
+          <button type="submit" class="button danger">Delete Account</button></form></article>
+      </section>
+      <section id="owner-view" hidden>
+        <div class="owner-head"><h1 id="owner-heading" tabindex="-1">Manage accounts</h1>
         <form id="search-form"><label for="search">Search users</label><div class="actions"><input id="search" placeholder="Name, email or number" maxlength="100"><button class="button subtle">Search</button></div></form></div>
+        <p id="platform-stats" class="small"></p>
+        <details class="panel admin-announcements"><summary>Publish an announcement</summary><form id="announcement-form">
+          <label for="announcement-title">Title</label><input id="announcement-title" required maxlength="90">
+          <label for="announcement-body">Announcement</label><textarea id="announcement-body" required maxlength="1600" rows="4"></textarea>
+          <button type="submit" class="button primary">Publish</button>
+        </form></details>
         <div class="table-scroll"><table><thead><tr><th>User</th><th>Coins</th><th>Account status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
         <div id="admin-detail" class="admin-detail" hidden>
           <h3 id="selected-user"></h3>
@@ -168,8 +303,13 @@
           <div class="panels audit"><div><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div><h3>Owner actions</h3><ul class="history" id="selected-audit"></ul></div></div>
         </div>
       </section>
+      </div>
     </section>
-    <footer><span><b>RAYMON BOT</b> / WhatsApp dashboard</span><span>Independent deployment portal</span></footer>
+    <button id="support-button" class="support-button icon-button" type="button" aria-label="Support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg></button>
+    <dialog id="notifications-dialog" class="portal-dialog notification-drawer" aria-labelledby="notifications-heading"><div class="dialog-head"><h2 id="notifications-heading">Notifications</h2><form method="dialog"><button class="icon-button" aria-label="Close notifications"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><div id="notifications-list" class="event-list" aria-live="polite"></div></dialog>
+    <dialog id="support-dialog" class="portal-dialog" aria-labelledby="support-heading"><div class="dialog-head"><h2 id="support-heading">Support</h2><form method="dialog"><button class="icon-button" aria-label="Close support"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><p id="support-message" class="muted"></p><a id="support-link" class="button primary" target="_blank" rel="noopener noreferrer" hidden>Contact support</a></dialog>
+    <dialog id="events-dialog" class="portal-dialog" aria-labelledby="events-heading"><div class="dialog-head"><h2 id="events-heading">Deployment Logs</h2><form method="dialog"><button class="icon-button" aria-label="Close logs"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 5 14 14M19 5 5 19"/></svg></button></form></div><div id="events-list" class="event-list"></div></dialog>
+    <footer id="site-footer">RAYMON BOT <span>WhatsApp automation portal</span></footer>
   </main>
 </body>
 </html>

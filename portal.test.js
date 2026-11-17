@@ -404,3 +404,97 @@ test('bundled runtime loads, applies settings and preserves them when reopened',
     assert.equal(saved.updateAlerts,false);
   }finally{await second.close();}
 });
+
+test('password changes revoke old sessions and closing an account preserves its billing records',async t=>{
+  const {store,owner}=fixture(t);
+  const origin='http://localhost:3000';
+  const server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>server.close());
+  const base='http://127.0.0.1:'+server.address().port;
+  const post=(path,data,cookie='')=>fetch(base+path,{method:'POST',
+    headers:{origin,'content-type':'application/json',cookie},body:JSON.stringify(data)});
+  const ref=store.user(owner).referral_code;
+  const password='initial test passphrase';
+  const signup=await post('/api/auth/register',{name:'Riley',username:'riley_user',email:'riley@example.test',
+    password,confirmation:password,referral:ref});
+  assert.equal(signup.status,201);
+  const sid=signup.headers.get('set-cookie').split(';')[0];
+  const account=store.session(sid.split('=')[1]);
+  assert.equal(store.get('SELECT referred_by FROM portal_profiles WHERE user_id=?',account.id).referred_by,owner);
+  const changes=await post('/api/profile',{username:'riley_new',name:'Riley Morgan',theme:'light'},sid);
+  assert.equal(changes.status,200);
+  assert.equal((await changes.json()).user.theme,'light');
+  const signin=await post('/api/auth/login',{email:'riley_new',password,remember:false});
+  assert.equal(signin.status,200);
+  assert.doesNotMatch(signin.headers.get('set-cookie'),/Max-Age/i);
+  const replacement='replacement test passphrase';
+  const update=await post('/api/auth/change-password',{currentPassword:password,password:replacement,confirmation:replacement},sid);
+  assert.equal(update.status,200);
+  assert.equal(store.session(sid.split('=')[1]),null);
+  assert.equal((await post('/api/auth/login',{email:'riley_new',password})).status,401);
+  const cookie=update.headers.get('set-cookie').split(';')[0];
+  store.pair(account.id,phone);
+  assert.equal((await post('/api/auth/close-account',{confirmation:'wrong',password:replacement},cookie)).status,400);
+  assert.equal((await post('/api/auth/close-account',{confirmation:'DELETE',password:'wrong'},cookie)).status,401);
+  assert.equal((await post('/api/auth/close-account',{confirmation:'DELETE',password:replacement},cookie)).status,200);
+  assert.equal(store.history(account.id).length,1);
+  assert.equal(store.deployments(account.id).length,0);
+  assert.equal((await post('/api/auth/login',{email:account.email,password:replacement})).status,401);
+  assert.equal(store.issuePasswordReset(account.email,'test'),false);
+});
+
+test('portal notifications and event logs are scoped and persisted',t=>{
+  const {store,owner,member}=fixture(t);
+  assert.throws(()=>store.publishAnnouncement(member,'Title','Body'),{status:403});
+  store.publishAnnouncement(owner,'Maintenance','Service notice');
+  store.pair(member,phone);
+  const bot=store.deployment(member);
+  const user=store.user(member);
+  const notice=store.notices(user).find(row=>row.title==='Pairing requested');
+  assert.ok(notice);
+  assert.throws(()=>store.updateNotice(store.user(owner),notice.id,'read'),{status:404});
+  assert.throws(()=>store.eventLogs(owner,bot.id),{status:404});
+  store.updateNotice(user,notice.id,'read');
+  assert.equal(store.notices(user).find(row=>row.id===notice.id).read,true);
+  store.updateNotice(user,notice.id,'dismiss');
+  assert.equal(store.notices(user).some(row=>row.id===notice.id),false);
+  assert.ok(store.notices(user).some(row=>row.title==='Maintenance'));
+  assert.equal(store.eventLogs(member,bot.id)[0].title,'Pairing requested');
+});
+
+test('worker times out an attempt with no code and the user can retry',async t=>{
+  const {store,member,clock,advance}=fixture(t);
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'raymon-no-code-'));
+  let stops=0;
+  const worker=new Worker({root,clock,url:'http://localhost:3000',token:'test',
+    fetcher:async(_url,req)=>Response.json({deployments:store.sync(JSON.parse(req.body).reports)}),
+    createBot:async()=>({bot:{sock:{},async start(){},async stop(){stops++;}},close(){}})});
+  t.after(async()=>{await worker.stop();await fs.rm(root,{recursive:true,force:true});});
+  store.pair(member,phone);
+  const first=store.deployment(member);
+  await worker.tick();
+  advance(76_000);
+  await worker.tick();
+  assert.equal(store.deployment(member).state,'pair_no_code');
+  assert.equal(stops,1);
+  assert.equal(store.user(member).coins,10);
+  store.pair(member,phone,{id:first.id});
+  assert.notEqual(store.deployment(member).generation,first.generation);
+});
+
+test('restart keeps the auth generation and rejects stale worker reports',t=>{
+  const {store,member,owner}=fixture(t);
+  store.pair(member,phone);
+  const bot=store.deployment(member);
+  store.sync([report(bot,'online')]);
+  assert.throws(()=>store.control(owner,'restart',bot.id),{status:404});
+  store.control(member,'restart',bot.id);
+  const task=store.sync([report(bot,'online')])[0];
+  assert.equal(task.generation,bot.generation);
+  assert.equal(store.deployment(member).state,'connecting');
+  store.sync([report(bot,'online',{restart:task.restart})]);
+  assert.equal(store.deployment(member).state,'online');
+  assert.equal(store.user(member).coins,0);
+  assert.equal(store.history(member).filter(row=>row.kind==='uptime').length,1);
+});
