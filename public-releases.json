@@ -7,5 +7,14 @@
         "summary": "Bot and website updates will now appear here with a short explanation of what changed."
       }
     ]
+  },
+  {
+    "id": "visible-update-mentions-v1",
+    "changes": [
+      {
+        "audience": "public",
+        "summary": "Update announcements now show member tags in the caption. Larger groups receive the tags across several messages."
+      }
+    ]
   }
 ]
