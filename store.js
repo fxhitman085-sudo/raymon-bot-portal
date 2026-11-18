@@ -1,4 +1,5 @@
 const community=require('./community');
+const {Recovery}=require('./recovery');
 const {DEFAULTS,validate,groupId,groupOptions}=require('./bot-settings');
 const {DatabaseSync}=require('node:sqlite');
 const {PortalV3,ACCOUNT_PERMISSIONS,ADMIN_ACTIONS}=require('./portal-v3');
@@ -138,6 +139,7 @@ class Store {
       }
     });
     this.v3=new PortalV3(this,PortalError);
+    this.recovery=new Recovery(this);
     community.init(this);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
