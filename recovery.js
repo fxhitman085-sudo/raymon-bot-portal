@@ -85,7 +85,7 @@ class Recovery {
       if(action==='approve'){
         if(typeof phone!=='string'||!/^[0-9]{8,16}$/.test(phone.replace(/^\+/,'')))
           fail(400,'Enter the full linked WhatsApp number, including country code.');
-        const normalized=phone.replace(/^\+/,'');
+        const normalized='+'+phone.replace(/^\+/,'');
         const verified=this.s.get('SELECT 1 FROM verified_numbers WHERE user_id=? AND phone=?',row.user_id,normalized);
         if(!verified)fail(403,'Linked WhatsApp number does not match. Do not approve this request.');
       }
