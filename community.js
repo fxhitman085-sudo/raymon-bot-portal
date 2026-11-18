@@ -53,7 +53,16 @@ async function announce(entry,active){
     try{await fs.writeFile(marker,'claimed',{flag:'wx',mode:0o600,flush:true});}
     catch(e){if(e.code==='EEXIST')continue;throw e;}
     if(!valid()){await fs.unlink(marker);return;}
-    await sock.sendMessage(group.id,{image,caption,mentions:[...new Set(ids)]});
+    const members=[...new Set(ids.map(id=>id.replace(/:\d+@/,'@')))];
+    for(let start=0;start<members.length;start+=50){
+      if(!valid())return;
+      const mentionedJid=members.slice(start,start+50);
+      const tags=mentionedJid.map(id=>'@'+id.split('@')[0]).join(' ');
+      const heading=start===0?caption:'⚡ RAYMON BOT Update · continued';
+      await sock.sendMessage(group.id,{
+        image,caption:heading+'\n\n'+tags,mentions:mentionedJid,contextInfo:{mentionedJid}
+      });
+    }
   }
 }
 
