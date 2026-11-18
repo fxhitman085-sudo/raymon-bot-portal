@@ -56,7 +56,7 @@ class Recovery {
   }
   status(id,secret){
     const row=this.own(id,secret);
-    if(!row)return {state:'expired'};
+    if(!row)return {state:validId(id)&&validBrowser(secret)?'pending':'expired'};
     if(row.state!=='approved')return {state:row.state,expires:row.expires};
     try{return {state:'approved',code:decrypt(secret,row.code_encrypted),expires:row.expires};}
     catch{return {state:'expired'};}
