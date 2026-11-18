@@ -1,6 +1,5 @@
 'use strict';
-const {randomBytes,createHash,createCipheriv,createDecipheriv,timingSafeEqual}=require('node:crypto');
-const {PortalError}=require('./store'); // lazily referenced only inside method calls below
+const {randomBytes,createHash,createCipheriv,createDecipheriv}=require('node:crypto');
 const DAY=86400000;
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const opaque=()=>randomBytes(32).toString('base64url');
@@ -99,14 +98,15 @@ class Recovery {
     });
   }
   consume(id,secret,code,passwordDigest){
-    if(!codeValid(code))fail(400,'Invalid recovery code.');
+    const initial=this.own(id,secret);
+    if(!initial||initial.state!=='approved')fail(400,'This recovery request is invalid or expired.');
+    if(initial.attempts>=5)fail(429,'Too many code attempts. Start a new request.');
+    this.s.run('UPDATE recovery_requests SET attempts=attempts+1 WHERE id=?',id);
+    if(!codeValid(code)||hash(id+':'+code)!==initial.code_hash)fail(400,'Invalid recovery code.');
     return this.s.tx(()=>{
       const row=this.own(id,secret);
       if(!row||row.state!=='approved')fail(400,'This recovery request is invalid or expired.');
       if(row.attempts>=5)fail(429,'Too many code attempts. Start a new request.');
-      this.s.run('UPDATE recovery_requests SET attempts=attempts+1 WHERE id=?',id);
-      const expected=hash(id+':'+code);
-      if(!timingSafeEqual(Buffer.from(expected),Buffer.from(row.code_hash)))fail(400,'Invalid recovery code.');
       const target=this.s.user(row.user_id);
       if(!target||target.banned||target.closed_at)fail(403,'Account unavailable.');
       this.s.run('UPDATE passwords SET digest=? WHERE user_id=?',passwordDigest,row.user_id);
