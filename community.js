@@ -45,24 +45,14 @@ async function announce(entry,active){
     try{await fs.access(marker);continue;}catch(e){if(e.code!=='ENOENT')throw e;}
     const info=await sock.groupGetInviteInfo(INVITE);
     if(!valid()||!info?.id?.endsWith('@g.us'))return;
-    const group=await sock.groupMetadata(info.id);
-    const ids=group.participants?.map(p=>p.id||p.lid||p.phoneNumber);
-    if(!ids?.length||ids.some(id=>!id)||!valid())return;
     const image=await fs.readFile(path.join(__dirname,'bot-runtime/assets/announcements.jpg'));
     if(!valid())return;
     try{await fs.writeFile(marker,'claimed',{flag:'wx',mode:0o600,flush:true});}
     catch(e){if(e.code==='EEXIST')continue;throw e;}
     if(!valid()){await fs.unlink(marker);return;}
-    const members=[...new Set(ids.map(id=>id.replace(/:\d+@/,'@')))];
-    for(let start=0;start<members.length;start+=50){
-      if(!valid())return;
-      const mentionedJid=members.slice(start,start+50);
-      const tags=mentionedJid.map(id=>'@'+id.split('@')[0]).join(' ');
-      const heading=start===0?caption:'⚡ RAYMON BOT Update · continued';
-      await sock.sendMessage(group.id,{
-        image,caption:heading+'\n\n'+tags,mentions:mentionedJid,contextInfo:{mentionedJid}
-      });
-    }
+    await sock.sendMessage(info.id,{
+      image,caption:caption+'\n\n@all',contextInfo:{nonJidMentions:1}
+    });
   }
 }
 
