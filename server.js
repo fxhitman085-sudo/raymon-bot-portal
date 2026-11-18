@@ -195,6 +195,7 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
   if(base.origin!==origin)throw new Error('PUBLIC_ORIGIN must be an origin without a trailing slash.');
   if(!workerToken||workerToken.length<32)throw new Error('Set WORKER_TOKEN to a strong shared secret of at least 32 characters.');
   const sessionName=secure?'__Host-raymon':'raymon';
+  const recoveryName=secure?'__Host-raymon-recovery':'raymon-recovery';
   const cookie=(name,value,age)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${secure?'; Secure':''}`;
   const attempts=new Map();
   let running=0,nextSweep=0;
@@ -267,32 +268,30 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
       if(!route.startsWith('/api/'))throw new PortalError(404,'Page not found.');
       const session=cookieValue(req,sessionName);
       const user=store.session(session);
-      if(method==='GET'&&route==='/api/me')return json(res,200,user?store.dashboard(user):{user:null,recoveryAvailable:!!sendMail});
+      if(method==='GET'&&route==='/api/me')return json(res,200,user?store.dashboard(user):{user:null,recoveryAvailable:true});
       if(method==='GET'&&route==='/api/community')return json(res,200,{
         announcements:store.announcements(),community:publicUrl(links.community),support:'https://wa.me/message/264FM6MC5QN3G1'});
       if(method==='POST'&&req.headers.origin!==origin)throw new PortalError(403,'Request origin not allowed.');
       if(method==='POST'&&route==='/api/auth/forgot-password'){
-        if(!sendMail)throw new PortalError(503,'Password recovery email is not configured. Contact the portal owner.');
         const data=await body(req), email=emailAddress(data?.email);
         if(!email)throw new PortalError(400,'Enter a valid email address.');
         rateLimit(req,email,'forgot-password');
-        const token=random();
-        if(store.issuePasswordReset(email,token)){
-          const link=new URL('/',origin);
-          link.hash='reset='+token;
-          void Promise.resolve().then(()=>sendMail({to:email,subject:'Reset your RAYMON BOT password',
-            text:'Open this link within 30 minutes to choose a new password. If you did not request this, ignore this email.\n\n'+link.href
-          })).catch(()=>console.error('Could not send a password recovery email.'));
-        }
-        return json(res,202,{ok:true});
+        const secret=random(), result=store.recovery.request(email,secret);
+        res.setHeader('Set-Cookie',cookie(recoveryName,secret,86400));
+        return json(res,202,{ok:true,requestId:result.id,expires:result.expires});
+      }
+      if(method==='GET'&&route==='/api/auth/recovery-status'){
+        const result=store.recovery.status(url.searchParams.get('requestId'),cookieValue(req,recoveryName));
+        return json(res,200,result);
       }
       if(method==='POST'&&route==='/api/auth/reset-password'){
         const data=await body(req);
-        const reset=store.passwordReset(data?.token);
-        rateLimit(req,reset?.email||'', 'reset-password');
-        if(!reset)throw new PortalError(400,'This reset link is invalid or expired. Request a new one.');
-        store.resetPassword(data.token,await passwordWork(newPassword(data.password)));
-        res.setHeader('Set-Cookie',cookie(sessionName,'',0));
+        rateLimit(req,String(data?.requestId||'').slice(0,30),'reset-password');
+        const password=newPassword(data?.password);
+        if(data?.confirmation!==password)throw new PortalError(400,'Passwords do not match.');
+        const encoded=await passwordWork(password);
+        store.recovery.consume(data?.requestId,cookieValue(req,recoveryName),data?.code,encoded);
+        res.setHeader('Set-Cookie',[cookie(sessionName,'',0),cookie(recoveryName,'',0)]);
         return json(res,200,{ok:true});
       }
       if(method==='POST'&&['/api/auth/register','/api/auth/login'].includes(route)){
@@ -323,6 +322,12 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
+      if(method==='GET'&&route==='/api/owner/recovery')return json(res,200,{items:store.recovery.inbox(user.id)});
+      if(method==='POST'&&route==='/api/owner/recovery'){
+        const data=await body(req);
+        rateLimit(req,user.id,'review-recovery');
+        return json(res,200,store.recovery.review(user.id,data?.requestId,data?.action,data?.phone));
+      }
       if(route.startsWith('/api/v3/')){
         const fresh=()=>{if(store.session(session)?.id!==user.id)throw new PortalError(401,'Sign in to continue.');};
         if(await v3Route({store,req,res,url,user,fresh,rateLimit}))return;

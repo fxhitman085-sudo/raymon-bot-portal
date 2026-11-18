@@ -13,9 +13,9 @@ function renderV3Access(user){
   const roleKey=JSON.stringify([user.email,user.staff]);
   if(roleKey!==previousRole){
     selectedUser=null;
-    for(const id of ['staff-inbox','staff-promos','staff-referrals','founder-staff','founder-audit','founder-payments','founder-packages','payment-history','users','selected-bots','selected-history','selected-audit'])
+    for(const id of ['staff-inbox','staff-recovery','staff-promos','staff-referrals','founder-staff','founder-audit','founder-payments','founder-packages','payment-history','users','selected-bots','selected-history','selected-audit'])
       $(id).replaceChildren();
-    for(const id of ['staff-inbox-panel','staff-promos-panel','staff-referrals-panel','founder-staff-panel','founder-audit-panel','founder-payments-panel','founder-packages-panel'])
+    for(const id of ['staff-inbox-panel','staff-recovery-panel','staff-promos-panel','staff-referrals-panel','founder-staff-panel','founder-audit-panel','founder-payments-panel','founder-packages-panel'])
       $(id).open=false;
     $('admin-detail').hidden=true;
     previousRole=roleKey;
@@ -29,6 +29,7 @@ function renderV3Access(user){
   $('staff-announcements').hidden=!can('announcements.publish');
   $('founder-rewards').hidden=$('founder-staff-panel').hidden=$('founder-audit-panel').hidden=!user.isOwner;
   $('staff-inbox-panel').hidden=!can('tickets.view');
+  $('staff-recovery-panel').hidden=!can('passwords.review');
   $('staff-promos-panel').hidden=!can('promos.view');
   $('staff-referrals-panel').hidden=!can('referrals.view');
   $('onboarding-card').hidden=user.onboarding==null||user.onboarding<0;
@@ -390,6 +391,37 @@ async function loadReferralAdmin(){
   }
 }
 bindPanel('staff-referrals-panel',loadReferralAdmin);
+
+async function loadRecoveryApprovals(){
+  const host=$('staff-recovery');
+  v3Text(host,'Loading recovery requests…');
+  const {items}=await request('/api/owner/recovery');
+  host.replaceChildren(element('p','Approve only after the requester sends this ID from their linked WhatsApp number. Compare the full phone number; never ask for their password or reset code.','small'));
+  if(!items.length)host.append(element('p','No pending recovery requests.','muted'));
+  for(const item of items){
+    const card=element('div',undefined,'v3-record');
+    card.append(element('strong',item.name+' · '+item.email),
+      element('p','Request ID: '+item.id+' · '+(item.phoneLinked?'Linked WhatsApp number available':'No verified phone on file'),'small'));
+    if(!item.phoneLinked){
+      card.append(element('p','Do not approve until the account has been securely verified through a separate recovery procedure.','small'));
+    }
+    const number=v3Input('tel',{placeholder:'Full WhatsApp number with country code',maxLength:18,autocomplete:'off'});
+    const form=element('form',undefined,'v3-form');
+    v3Field(form,'Verify linked WhatsApp number',number);
+    const controls=element('div',undefined,'actions');
+    controls.append(v3Button('Approve request',async()=>{
+      if(!window.confirm('Confirm that this person contacted support from the linked WhatsApp number and the ID matches?'))return;
+      await request('/api/owner/recovery',{requestId:item.id,action:'approve',phone:number.value.trim()});
+      await loadRecoveryApprovals();note('Password reset approved.');
+    },'primary'),v3Button('Reject',async()=>{
+      if(!window.confirm('Reject this password reset request?'))return;
+      await request('/api/owner/recovery',{requestId:item.id,action:'reject'});
+      await loadRecoveryApprovals();note('Request rejected.');
+    }));
+    form.append(controls);card.append(form);host.append(card);
+  }
+}
+bindPanel('staff-recovery-panel',loadRecoveryApprovals);
 
 let editLevel=1;
 function levelSelect(value){

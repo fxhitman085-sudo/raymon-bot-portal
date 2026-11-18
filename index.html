@@ -55,14 +55,24 @@
         </form>
         <form id="recovery-form" hidden>
           <h2>Recover your account</h2>
-          <label for="recovery-email">Portal email address</label>
+          <p class="small">Request an administrator-approved password reset. No email code is needed.</p>
+          <label for="recovery-email">Registered portal email</label>
           <input id="recovery-email" type="email" autocomplete="email" maxlength="254" required>
-          <div class="actions"><button class="button primary" type="submit">Email me a reset link</button><button id="cancel-recovery" class="button subtle" type="button">Back to sign in</button></div>
+          <div class="actions"><button class="button primary" type="submit">Request password reset</button><button id="cancel-recovery" class="button subtle" type="button">Back to sign in</button></div>
+          <div id="recovery-tracker" hidden>
+            <p>Your recovery request ID: <strong id="recovery-id"></strong></p>
+            <p class="small">Send this ID to support from the WhatsApp number linked to your portal account. An authorized administrator will verify the number before approval. Never send your reset code or password to support.</p>
+            <p id="recovery-status" role="status">Awaiting admin approval.</p>
+            <div class="actions"><a class="button subtle" target="_blank" rel="noopener noreferrer" href="https://wa.me/message/264FM6MC5QN3G1">Contact WhatsApp support</a><button id="check-recovery" type="button" class="button subtle">Check approval</button></div>
+          </div>
         </form>
         <form id="reset-form" hidden>
           <h2>Choose a new password</h2>
-          <label for="reset-password">New password</label>
+          <p>Administrator approval received. Your one-time code is: <strong id="reset-code-display"></strong></p>
+          <label for="reset-code">One-time reset code</label><input id="reset-code" type="text" autocomplete="one-time-code" minlength="10" maxlength="10" required>
+          <label for="reset-password">New password (12 characters minimum)</label>
           <input id="reset-password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+          <label for="reset-confirm">Confirm new password</label><input id="reset-confirm" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
           <div class="actions"><button class="button primary" type="submit">Reset password</button><a class="button subtle" href="/">Back to portal</a></div>
         </form>
       </div>
@@ -367,6 +377,7 @@
         </div>
         <div id="v3-admin-tools" class="v3-stack">
           <details id="staff-inbox-panel" class="panel" hidden><summary>Support inbox</summary><div id="staff-inbox"></div></details>
+          <details id="staff-recovery-panel" class="panel" hidden><summary>Password Reset Approvals</summary><div id="staff-recovery"></div></details>
           <details id="staff-promos-panel" class="panel" hidden><summary>Promotional Coin Codes</summary><div id="staff-promos"></div></details>
           <details id="staff-referrals-panel" class="panel" hidden><summary>Referral Leaderboard Prizes</summary><div id="staff-referrals"></div></details>
           <details id="founder-packages-panel" class="panel" hidden><summary>Coin Packages</summary><div id="founder-packages"></div></details>

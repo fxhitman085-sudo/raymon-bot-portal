@@ -335,10 +335,9 @@ test('HTTP password signup and login, protected owner, origin and worker access'
   assert.equal((await get('/store.js')).status,404);
 });
 
-test('owner sign-in survives a restart, and password recovery keeps the same account and wallet',async t=>{
-  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'portal-account-test-'));
-  const file=path.join(dir,'portal.sqlite'), emails=[];
-  const origin='http://localhost:3000';
+test('owner sign-in survives restart; admin-approved recovery preserves account and coins',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'portal-recovery-'));
+  const file=path.join(dir,'portal.sqlite'),origin='http://localhost:3000';
   let now=Date.now(),store,server;
   t.after(async()=>{
     if(server)await new Promise(resolve=>server.close(resolve));
@@ -347,46 +346,75 @@ test('owner sign-in survives a restart, and password recovery keeps the same acc
   });
   async function boot(){
     store=new Store(file,()=>now);
-    server=createServer({store,origin,workerToken:'w'.repeat(40),
-      sendMail:async mail=>{emails.push(mail);}});
+    server=createServer({store,origin,workerToken:'w'.repeat(40)});
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   }
   const url=route=>'http://127.0.0.1:'+server.address().port+route;
-  const post=(route,data,cookie)=>fetch(url(route),{method:'POST',
-    headers:{origin,'Content-Type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)});
-  const credentials={email:OWNER_EMAIL,password};
+  const post=(route,data,cookies)=>fetch(url(route),{method:'POST',
+    headers:{origin,'Content-Type':'application/json',...(cookies?{cookie:cookies}:{})},body:JSON.stringify(data)});
   const cookieOf=response=>response.headers.get('set-cookie').split(';')[0];
   await boot();
   const id=seedFounder(store,password);
   store.admin(id,id,{action:'grant',amount:37,reason:'Persisted balance'});
-  await new Promise(resolve=>server.close(resolve));server=null;
-  store.db.close();store=null;
+  store.run('INSERT INTO verified_numbers VALUES (?,?)',phone,id);
+  await new Promise(resolve=>server.close(resolve));server=null;store.db.close();store=null;
   await boot();
+  const credentials={email:OWNER_EMAIL,password};
   const login=await post('/api/auth/login',credentials);
   assert.equal(login.status,200);
-  const oldCookie=cookieOf(login);
+  const ownerCookie=cookieOf(login);
   assert.equal((await login.json()).user.coins,47);
-  assert.deepEqual(await (await post('/api/auth/forgot-password',{email:'unknown@example.com'})).json(),{ok:true});
-  assert.equal(emails.length,0);
-  const requestReset=()=>post('/api/auth/forgot-password',{email:OWNER_EMAIL});
-  assert.equal((await requestReset()).status,202);
-  const token=mail=>mail.text.match(/#reset=([\w-]+)/)[1];
-  const expired=token(emails[0]);
-  assert.equal(store.get('SELECT token FROM password_resets').token===expired,false);
-  now+=30*60_000;
+  const missing=await post('/api/auth/forgot-password',{email:'unknown@example.com'});
+  assert.equal(missing.status,202);
+  assert.equal((await missing.json()).ok,true);
+  const request=await post('/api/auth/forgot-password',{email:OWNER_EMAIL});
+  assert.equal(request.status,202);
+  const {requestId}=await request.json(),browser=cookieOf(request);
+  assert.match(requestId,/^[A-F0-9]{16}$/);
+  const status=async cookie=>(await fetch(url('/api/auth/recovery-status?requestId='+requestId),{headers:cookie?{cookie}:undefined})).json();
+  assert.equal((await status(browser)).state,'pending');
+  assert.equal((await status()).state,'expired');
+  assert.equal((await post('/api/owner/recovery',{requestId,action:'approve',phone:phone2},ownerCookie)).status,403);
+  assert.equal((await post('/api/owner/recovery',{requestId,action:'approve',phone},ownerCookie)).status,200);
+  const approved=await status(browser);
+  assert.equal(approved.state,'approved');
+  assert.match(approved.code,/^[A-Z2-9]{10}$/);
+  assert.equal((await status()).code,undefined);
   const newPassword='a different test-only password';
-  const reset=token=>post('/api/auth/reset-password',{token,password:newPassword});
-  assert.equal((await reset(expired)).status,400);
-  assert.equal((await requestReset()).status,202);
-  const valid=token(emails[1]);
-  assert.equal((await reset(valid)).status,200);
-  assert.equal((await reset(valid)).status,400);
-  assert.equal((await (await fetch(url('/api/me'),{headers:{cookie:oldCookie}})).json()).user,null);
+  const reset={requestId,code:approved.code,password:newPassword,confirmation:newPassword};
+  assert.equal((await post('/api/auth/reset-password',reset)).status,400);
+  assert.equal((await post('/api/auth/reset-password',{...reset,code:'AAAAAAAAAA'},browser)).status,400);
+  assert.equal((await post('/api/auth/reset-password',reset,browser)).status,200);
+  assert.equal((await post('/api/auth/reset-password',reset,browser)).status,400);
+  assert.equal((await (await fetch(url('/api/me'),{headers:{cookie:ownerCookie}})).json()).user,null);
   assert.equal((await post('/api/auth/login',credentials)).status,401);
   const recovered=await (await post('/api/auth/login',{...credentials,password:newPassword})).json();
   assert.equal(store.password(OWNER_EMAIL).user_id,id);
   assert.equal(recovered.user.isOwner,true);
   assert.equal(recovered.user.coins,47);
+});
+
+test('recovery approval respects administrator permissions, linked phone and code attempt limits',t=>{
+  const {store,owner,member}=fixture(t);
+  const target=store.register({email:'recovery-target@example.com',name:'Target',digest:'original-hash'}).id;
+  store.v3.setStaff(owner,{userId:member,action:'level',level:2});
+  store.run('INSERT INTO verified_numbers VALUES (?,?)',phone,target);
+  const browser='z'.repeat(43),{id}=store.recovery.request('recovery-target@example.com',browser);
+  assert.equal(store.recovery.inbox(owner).length,1);
+  assert.throws(()=>store.recovery.inbox(member),{status:403});
+  store.v3.setPermissions(owner,{level:2,permissions:['passwords.review']});
+  assert.equal(store.recovery.inbox(member).length,1);
+  assert.throws(()=>store.recovery.review(member,id,'approve',phone2),{status:403});
+  assert.equal(store.recovery.review(member,id,'approve',phone).ok,true);
+  const code=store.recovery.status(id,browser).code;
+  assert.ok(code);
+  assert.throws(()=>store.recovery.consume(id,'a'.repeat(43),code,'new-hash'),{status:400});
+  for(let i=0;i<5;i++)assert.throws(()=>store.recovery.consume(id,browser,'AAAAAAAAAA','new-hash'),{status:400});
+  assert.equal(store.get('SELECT attempts FROM recovery_requests WHERE id=?',id).attempts,5);
+  assert.throws(()=>store.recovery.consume(id,browser,code,'new-hash'),{status:429});
+  assert.equal(store.password('recovery-target@example.com').digest,'original-hash');
+  store.v3.setStaff(owner,{userId:member,action:'suspend'});
+  assert.throws(()=>store.recovery.inbox(member),{status:403});
 });
 
 test('public signup cannot create a Founder and a legacy user can keep their account',async t=>{

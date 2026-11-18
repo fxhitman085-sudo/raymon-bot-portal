@@ -15,7 +15,8 @@ const PERMISSIONS={
   'promos.view':'View promo codes and redemption history',
   'referrals.view':'View leaderboard prize and review history',
   'referrals.review':'Exclude or restore referral entries',
-  'announcements.publish':'Publish website announcements'
+  'announcements.publish':'Publish website announcements',
+  'passwords.review':'Review verified account recovery requests'
 };
 const ACCOUNT_PERMISSIONS=Object.keys(PERMISSIONS).filter(key=>/^(users|coins|deployments)\./.test(key));
 const ADMIN_ACTIONS={grant:'coins.adjust',remove:'coins.adjust',ban:'users.moderate',unban:'users.moderate',

@@ -3,11 +3,12 @@ const $=id=>document.getElementById(id);
 const names={queued:'Requesting code',awaiting_code:'Waiting for pairing',connecting:'Connecting',reconnecting:'Reconnecting',online:'Online',paused:'Paused',
   low_balance:'Out of coins',expired:'Code expired',needs_pairing:'Needs pairing',pair_failed:'Pairing failed',pair_no_code:'No pairing code received',suspended:'Suspended'};
 const formatDate=value=>new Date(value).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-let current,selectedUser,selectedBotId,addingBot=false,botListView,pendingTransfer,workspaceView='home',manageOpen=false,refreshing=false,registering=false,recovering=false;
-let resetToken=new URLSearchParams(location.hash.slice(1)).get('reset');
-if(resetToken)history.replaceState(null,'',location.pathname+location.search);
+let recoveryId=sessionStorage.getItem('raymonRecoveryId');
+let current,selectedUser,selectedBotId,addingBot=false,botListView,pendingTransfer,workspaceView='home',manageOpen=false,refreshing=false,registering=false,recovering=!!recoveryId;
+let resetToken=null;
+if(location.hash.startsWith('#reset='))history.replaceState(null,'',location.pathname+location.search);
 const referral=new URLSearchParams(location.search).get('ref');
-let authOpen=!!resetToken,profileUser=null;
+let authOpen=!!recoveryId,profileUser=null;
 const numberFormat=new Intl.NumberFormat();
 const note=(message,error=false)=>{
   $('notice').textContent=message;
@@ -151,7 +152,7 @@ function draw(data){
   $('sign-out').hidden=!user||!!resetToken;
   $('sign-in-link').hidden=!!user||!!resetToken;
   $('site-footer').hidden=!!user&&!resetToken;
-  $('show-recovery').hidden=registering||!data.recoveryAvailable;
+  $('show-recovery').hidden=registering;
   if(!user||resetToken){
     $('guide-dialog').close();
     return;
@@ -650,7 +651,7 @@ function authMode(register){
   $('auth-password').autocomplete=register?'new-password':'current-password';
   $('auth-password').minLength=register?12:1;
   $('auth-submit').textContent=register?'Create account':'Sign in';
-  $('show-recovery').hidden=register||!current?.recoveryAvailable;
+  $('show-recovery').hidden=register;
   for(const [id,active] of [['auth-login',!register],['auth-register',register]]){
     $(id).classList.toggle('selected',active);
     $(id).setAttribute('aria-pressed',String(active));
@@ -664,26 +665,58 @@ function authView(){
   $('auth-login').closest('.tabs').hidden=recovering||!!resetToken;
 }
 authView();
+function showRecoveryId(){
+  $('recovery-tracker').hidden=!recoveryId;
+  $('recovery-id').textContent=recoveryId||'';
+  if(recoveryId)$('recovery-status').textContent='Awaiting administrator approval. Check again after support verifies your linked number.';
+}
+async function checkRecovery(){
+  if(!recoveryId)return;
+  const status=await request('/api/auth/recovery-status?'+new URLSearchParams({requestId:recoveryId}));
+  if(status.state==='approved'){
+    resetToken='approved';recovering=false;authOpen=true;
+    $('reset-code-display').textContent=status.code;
+    $('reset-code').value=status.code;
+    authView();$('reset-password').focus();
+    note('Approved. Enter a new password before your reset code expires.');
+  }else if(status.state==='expired'||status.state==='used'||status.state==='rejected'){
+    $('recovery-status').textContent=status.state==='rejected'?'Request declined. Contact support or start a new request.':'Request expired or completed. Start another request if needed.';
+    sessionStorage.removeItem('raymonRecoveryId');recoveryId=null;
+    $('recovery-email').disabled=false;
+  }else{
+    $('recovery-status').textContent='Awaiting administrator approval.';
+  }
+}
+showRecoveryId();
+if(recoveryId)checkRecovery().catch(()=>{});
+$('check-recovery').addEventListener('click',()=>action($('check-recovery'),checkRecovery));
 $('auth-login').addEventListener('click',()=>authMode(false));
 $('auth-register').addEventListener('click',()=>authMode(true));
 $('show-recovery').addEventListener('click',()=>{
   $('recovery-email').value=$('auth-email').value;
-  recovering=true;note('');authView();$('recovery-email').focus();
+  recovering=true;note('');authView();showRecoveryId();$('recovery-email').focus();
 });
 $('cancel-recovery').addEventListener('click',()=>{recovering=false;note('');authView();$('auth-email').focus();});
 $('recovery-form').addEventListener('submit',event=>{
   event.preventDefault();
   action(event.submitter,async()=>{
-    await request('/api/auth/forgot-password',{email:$('recovery-email').value});
-    note('If that address has a portal account, a reset link will arrive by email.');
+    const result=await request('/api/auth/forgot-password',{email:$('recovery-email').value});
+    recoveryId=result.requestId;
+    sessionStorage.setItem('raymonRecoveryId',recoveryId);
+    showRecoveryId();
+    note('Request created. Send the ID to WhatsApp support from your linked phone number.');
   });
 });
 $('reset-form').addEventListener('submit',event=>{
   event.preventDefault();
   action(event.submitter,async()=>{
-    await request('/api/auth/reset-password',{token:resetToken,password:$('reset-password').value});
+    await request('/api/auth/reset-password',{
+      requestId:recoveryId,code:$('reset-code').value.trim().toUpperCase(),
+      password:$('reset-password').value,confirmation:$('reset-confirm').value
+    });
     event.target.reset();
-    resetToken=null;recovering=false;authOpen=true;
+    sessionStorage.removeItem('raymonRecoveryId');
+    recoveryId=null;resetToken=null;recovering=false;authOpen=true;
     authMode(false);authView();
     await refresh();
     note('Password updated. Sign in with your new password.');
