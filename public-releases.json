@@ -16,5 +16,14 @@
         "summary": "Update announcements now show member tags in the caption. Larger groups receive the tags across several messages."
       }
     ]
+  },
+  {
+    "id": "native-everyone-update-v1",
+    "changes": [
+      {
+        "audience": "public",
+        "summary": "Group updates now arrive in one image message with a single group-wide mention."
+      }
+    ]
   }
 ]
