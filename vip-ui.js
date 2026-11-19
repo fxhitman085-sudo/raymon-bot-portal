@@ -47,6 +47,9 @@ async function loadVip(){
       const button=element('button',duration==='weekly'?'7 days · '+price+' coins':'30 days · '+price+' coins','button '+(duration==='monthly'?'primary':'subtle'));
       button.type='button';
       if(info.tier===plan.tier){button.disabled=true;button.textContent=vipLabel(plan.tier)+' active';}
+      else if(info.tier&&['silver','gold','diamond'].indexOf(plan.tier)<['silver','gold','diamond'].indexOf(info.tier)){
+        button.disabled=true;button.textContent='After current VIP expires';
+      }
       button.addEventListener('click',()=>action(button,async()=>{
         if(!window.confirm('Purchase '+vipLabel(plan.tier)+' VIP for '+duration+'? Price '+price+' coins. Any unused membership credit is applied at checkout.'))return;
         const result=await request('/api/vip',{action:'buy',tier:plan.tier,duration,autoRenew:false});
