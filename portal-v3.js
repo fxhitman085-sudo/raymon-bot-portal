@@ -16,7 +16,11 @@ const PERMISSIONS={
   'referrals.view':'View leaderboard prize and review history',
   'referrals.review':'Exclude or restore referral entries',
   'announcements.publish':'Publish website announcements',
-  'passwords.review':'Review verified account recovery requests'
+  'passwords.review':'Review verified account recovery requests',
+  'vip.view':'View VIP members and subscriptions',
+  'vip.plans':'Configure VIP prices and benefits',
+  'vip.grant':'Grant or revoke VIP memberships',
+  'diagnostics.view':'View pairing diagnostics and worker health'
 };
 const ACCOUNT_PERMISSIONS=Object.keys(PERMISSIONS).filter(key=>/^(users|coins|deployments)\./.test(key));
 const ADMIN_ACTIONS={grant:'coins.adjust',remove:'coins.adjust',ban:'users.moderate',unban:'users.moderate',
@@ -414,6 +418,7 @@ class PortalV3 {
       if(decision==='approved'){
         this.s.credit(payment.user_id,payment.coins,'coin_purchase',
           'Bank transfer purchase · '+payment.reference,id,'payment:'+payment.id);
+        this.s.vip.purchaseBonus(payment.user_id,payment.coins,payment.id);
       }
       this.s.run('UPDATE v3_payments SET status=?,reason=?,reviewer=?,reviewed=? WHERE id=?',
         decision,message,id,this.s.clock(),payment.id);
