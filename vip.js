@@ -109,6 +109,8 @@ class Vip {
         this.fail(400,'Choose an available VIP package and duration.');
       const now=this.s.clock(),existing=this.membership(userId);
       if(existing&&existing.tier===tier)this.fail(409,'You already have this tier. Change renewal settings or renew after expiration.');
+      if(existing&&tierRank(tier)<tierRank(existing.tier))
+        this.fail(409,'Keep your current VIP benefits until expiration, then select the lower tier.');
       const full=duration==='weekly'?plan.weekly:plan.monthly;
       const credit=existing?Math.min(full,Math.floor((existing.expiry-now)/(existing.duration==='weekly'?WEEK:MONTH)*
         (this.config(existing.tier)?.[existing.duration]||0))):0;
