@@ -618,11 +618,12 @@ class Store {
         pairingExpires:d.intent==='pair'&&d.pair_until>now?d.pair_until:null,
         code:d.intent==='pair'&&code?.generation===d.generation&&code.expires>now&&!user.banned?code.value:null};
     });
-    const {used,accountUsed}=this.get(`SELECT COUNT(*) AS used,
-      COUNT(CASE WHEN d.user_id=? THEN 1 END) AS accountUsed
+    const occupied=this.all(`SELECT d.user_id,d.intent,d.pair_until,d.paid_until,u.coins
       FROM deployments d JOIN users u ON u.id=d.user_id
-      WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
-      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,user.id,now,now,PRICE);
+      WHERE u.banned=0 AND d.intent IN ('pair','run')`)
+      .filter(d=>d.intent==='pair'?d.pair_until>now&&(d.paid_until>now||d.coins>=this.vip.rate(d.user_id)):
+        d.paid_until>now||d.coins>=this.vip.rate(d.user_id));
+    const used=occupied.length,accountUsed=occupied.filter(d=>d.user_id===user.id).length;
     return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
       username:user.username,theme:this.vip.themeAllowed(user.id,user.theme)?user.theme:'dark',created:user.created,referralCode:user.referral_code,
       avatarVersion:this.get('SELECT version FROM portal_avatars WHERE user_id=?',user.id)?.version||null,
