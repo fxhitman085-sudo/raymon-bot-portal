@@ -54,10 +54,10 @@ function startRenewalNotices(store,sendMail,origin){
   async function deliver(){
     for(const notice of store.pendingRenewalNotices()){
       if(stopping)break;
-      const {id,phone,paid_until:paidUntil,email}=notice;
+      const {id,phone,paid_until:paidUntil,email,rate}=notice;
       try{
         await sendMail({to:email,subject:'RAYMON BOT needs coins before renewal',id:'renewal/'+id+'/'+paidUntil,
-          text:'Your bot for '+phone+' needs 10 coins to renew. Its current time ends at '+new Date(paidUntil).toUTCString()+
+          text:'Your bot for '+phone+' needs '+rate+' coins to renew. Its current time ends at '+new Date(paidUntil).toUTCString()+
             '. Each bot renews from your shared balance. View your balance and local renewal times at '+origin+'/'});
         store.markRenewalNotice(id,paidUntil);
       }catch{console.error('Could not send a low-balance email. Will retry.');}
