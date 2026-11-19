@@ -217,12 +217,24 @@ class PortalV3 {
     });
   }
   ticketInbox(id,staff,before){
-    if(staff)this.permit(id,'tickets.view');
-    else this.s.requireActive(id);
+    if(staff){
+      this.permit(id,'tickets.view');
+      const rank=before?.rank??0,stamp=before?.stamp??null;
+      return this.s.all(`WITH ranked AS (
+        SELECT t.id,t.subject,t.closed,t.updated,t.created,a.name AS assignee,u.name AS requester,
+          COALESCE((SELECT CASE m.tier WHEN 'diamond' THEN 3 WHEN 'gold' THEN 2 WHEN 'silver' THEN 1 ELSE 0 END
+            FROM vip_memberships m WHERE m.user_id=t.user_id AND m.expiry>? LIMIT 1),0) AS priorityRank
+        FROM v3_tickets t JOIN users u ON u.id=t.user_id LEFT JOIN users a ON a.id=t.assignee)
+        SELECT * FROM ranked WHERE (? IS NULL OR priorityRank<? OR
+          (priorityRank=? AND (updated<? OR (updated=? AND id<?))))
+        ORDER BY priorityRank DESC,updated DESC,id DESC LIMIT 51`,
+        this.s.clock(),stamp,rank,rank,stamp??0,stamp??0,before?.id??'');
+    }
+    this.s.requireActive(id);
     return this.s.all(`SELECT t.id,t.subject,t.closed,t.updated,t.created,a.name AS assignee,u.name AS requester
       FROM v3_tickets t JOIN users u ON u.id=t.user_id LEFT JOIN users a ON a.id=t.assignee
-      WHERE (? OR t.user_id=?) AND (? IS NULL OR t.updated<? OR (t.updated=? AND t.id<?))
-      ORDER BY t.updated DESC,t.id DESC LIMIT 51`,Number(staff),id,before?.stamp??null,
+      WHERE t.user_id=? AND (? IS NULL OR t.updated<? OR (t.updated=? AND t.id<?))
+      ORDER BY t.updated DESC,t.id DESC LIMIT 51`,id,before?.stamp??null,
       before?.stamp??null,before?.stamp??null,before?.id??'');
   }
   ticket(id,ticketId,staff){
