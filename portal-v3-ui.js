@@ -496,9 +496,12 @@ async function loadStaff(){
       await request(v3Path('permissions'),{level:Number(select.value),permissions:selected});
       await loadStaff();await refresh();note('Role permissions saved and enforced.');
     });
-    host.append(element('h3','Role & Permission Editor'),form);
+    const roleRegion=element('div',undefined,'cc4-role-region');
+    roleRegion.append(element('h3','Role & Permission Editor'),form);
+    host.append(roleRegion);
   }
-  host.append(element('h3','Staff Directory'),element('p',canEditPermissions?
+  const dirRegion=element('div',undefined,'cc4-directory-region');
+  dirRegion.append(element('h3','Staff Directory'),element('p',canEditPermissions?
     'Appoint and manage administrator levels 1–7.':
     'Delegated authority: manage Levels 1–6 only. You cannot modify yourself or other Level 7 administrators.','small'));
   const searchBox=element('div',undefined,'cc4-staff-search');
@@ -519,8 +522,8 @@ async function loadStaff(){
     }
   });
   searchBox.append(searchForm,results);
-  host.append(searchBox);
-  if(!admins.length)host.append(element('p','No administrators appointed.','muted'));
+  dirRegion.append(searchBox);
+  if(!admins.length)dirRegion.append(element('p','No administrators appointed.','muted'));
   for(const admin of admins){
     const card=element('details',undefined,'v3-record cc4-staff-card');
     card.append(element('summary',admin.name+' · Adm Lvl '+admin.level+(admin.suspended?' · Suspended':'')));
@@ -532,8 +535,9 @@ async function loadStaff(){
     actions.append(v3Button('Remove administrator',async()=>{
       if(window.confirm('Remove administrator access for '+admin.name+'?'))await staffChange(admin.id,'remove');
     },'danger'));
-    card.append(actions);host.append(card);
+    card.append(actions);dirRegion.append(card);
   }
+  host.append(dirRegion);
   auditHost.replaceChildren();
   if(!audit.length)v3Text(auditHost,'No administration activity recorded.');
   for(const row of audit){
