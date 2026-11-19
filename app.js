@@ -803,6 +803,10 @@ function initials(name){
   return name.trim().split(/\s+/).slice(0,2).map(word=>[...word][0]).join('').toUpperCase();
 }
 function renderProfile(user){
+  for(const option of $('theme-select').options){
+    option.disabled=!['dark','light'].includes(option.value)&&!user.vip?.allowedThemes?.includes(option.value);
+    option.hidden=option.disabled;
+  }
   const stamp=JSON.stringify([user.name,user.username,user.email,user.theme]);
   if(stamp!==profileUser){
     profileUser=stamp;
