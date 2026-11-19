@@ -12,7 +12,7 @@ const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
 
 const random=()=>randomBytes(32).toString('base64url');
-const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
+const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
 const equal=(left,right)=>typeof left==='string'&&typeof right==='string'&&Buffer.byteLength(left)===Buffer.byteLength(right)&&timingSafeEqual(Buffer.from(left),Buffer.from(right));
 const cookieValue=(req,name)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith(name+'='))?.slice(name.length+1);
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));};
@@ -322,6 +322,27 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
+      if(method==='GET'&&route==='/api/vip')return json(res,200,store.vip.status(user.id));
+      if(method==='GET'&&route==='/api/vip/backups')return json(res,200,{backups:store.vip.backups(user.id)});
+      if(method==='GET'&&route==='/api/vip/analytics')return json(res,200,store.vip.analytics(user.id,url.searchParams.get('botId')));
+      if(method==='GET'&&route==='/api/vip/members')return json(res,200,{members:store.vip.members(user.id),plans:store.vip.plans()});
+      if(method==='GET'&&route==='/api/diagnostics')return json(res,200,store.diagnostics.report(user.id,url.searchParams.get('botId')));
+      if(method==='GET'&&route==='/api/owner/diagnostics')return json(res,200,store.diagnostics.fleet(user.id));
+      if(method==='POST'&&route==='/api/vip'){
+        const data=await body(req);rateLimit(req,user.id,'vip-'+String(data?.action||'').slice(0,20));
+        const action=data?.action;let result;
+        if(action==='buy')result=store.vip.buy(user.id,data);
+        else if(action==='renewal')result=store.vip.setRenewal(user.id,data.enabled);
+        else if(action==='claim')result=store.vip.claim(user.id);
+        else if(action==='branding')result=store.vip.branding(user.id,data.title);
+        else if(action==='backup')result=store.vip.backup(user.id,data.deploymentId);
+        else if(action==='restore')result=store.vip.restore(user.id,data.backupId);
+        else if(action==='configure')result=store.vip.configure(user.id,data);
+        else if(action==='grant')result=store.vip.grant(user.id,data);
+        else if(action==='revoke')result=store.vip.revoke(user.id,data.userId);
+        else throw new PortalError(400,'Unknown VIP action.');
+        return json(res,200,result);
+      }
       if(method==='GET'&&route==='/api/owner/recovery')return json(res,200,{items:store.recovery.inbox(user.id)});
       if(method==='POST'&&route==='/api/owner/recovery'){
         const data=await body(req);
@@ -497,6 +518,7 @@ if(require.main===module){
   const stopNotices=sendMail&&startRenewalNotices(store,sendMail,origin);
   const settlePrizes=()=>{
     try{store.v3.settleAutomatic();}catch(error){console.error('Could not process leaderboard prizes:',error.message);}
+    try{store.vip.tick();}catch(error){console.error('VIP renewals failed:',error.message);}
   };
   const prizeTimer=setInterval(settlePrizes,60_000);
   prizeTimer.unref();
