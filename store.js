@@ -624,7 +624,7 @@ class Store {
       WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
       (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,user.id,now,now,PRICE);
     return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
-      username:user.username,theme:user.theme||'dark',created:user.created,referralCode:user.referral_code,
+      username:user.username,theme:this.vip.themeAllowed(user.id,user.theme)?user.theme:'dark',created:user.created,referralCode:user.referral_code,
       avatarVersion:this.get('SELECT version FROM portal_avatars WHERE user_id=?',user.id)?.version||null,
       banned:!!user.banned,needsPassword:!this.hasPassword(user.id),staff:this.v3.role(user),
       onboarding:this.v3.onboarding(user.id),vip:this.vip.status(user.id)},capacity:{used,accountUsed,total:this.maxBots},
