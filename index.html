@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
   <script src="/portal-v3-ui.js" defer></script>
+  <script src="/vip-ui.js" defer></script>
 </head>
 <body>
   <header class="top"><div class="shell nav">
@@ -107,6 +108,7 @@
         <button id="view-wallet" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8V5H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7m19 6h-5a2 2 0 1 0 0 4h5"/></svg>My Coins</button>
         <button id="view-buy" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h2l3 11h11l2-8H6m3 13h.01m9 0h.01"/></svg>Buy Coins</button>
         <button id="view-community" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2v4l5-4zM7 10h10"/></svg>Community</button>
+        <button id="view-vip" class="nav-item" type="button">👑 VIP Membership</button>
         <button id="view-profile" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>My Profile</button>
         <button id="view-owner" class="nav-item" type="button" hidden><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-3 8-11V5l-8-3-8 3v6c0 8 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg>Admin</button>
         <button id="view-rankings" class="nav-item" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8m-4-4v4M7 4h10v7a5 5 0 0 1-10 0V4ZM7 6H3v2a4 4 0 0 0 4 4m10-6h4v2a4 4 0 0 1-4 4"/></svg>Leaderboard</button>
@@ -171,6 +173,12 @@
             <p id="deploy-description" class="muted" hidden>Connect your WhatsApp account and launch your bot through our secure deployment system.</p>
             <p id="connection-info" class="muted">Use a WhatsApp account you control.</p>
             <p id="connection-diagnostics" class="small" hidden></p>
+            <details class="diagnostic-panel" id="bot-diagnostics-panel">
+              <summary>🛠️ Pairing & Connection Troubleshooter</summary>
+              <p class="small">Check the worker connection and safe recovery options for this bot.</p>
+              <div class="actions"><button id="diagnose-bot" class="button subtle" type="button">Run diagnostics</button><button id="diagnose-support" class="button subtle" type="button" hidden>Contact support</button></div>
+              <div id="diagnostic-report" role="status"></div>
+            </details>
             <form id="pair-form">
               <div id="number-step"><div class="phone-fields"><div><label for="country-code">Country code</label><input id="country-code" type="tel" inputmode="tel" autocomplete="tel-country-code" maxlength="5" placeholder="+234"></div>
               <div><label for="phone">WhatsApp number</label><input id="phone" name="phone" type="tel" autocomplete="tel-national" inputmode="tel" maxlength="24" placeholder="800 000 0000" required></div></div>
@@ -280,6 +288,16 @@
         <div class="actions community-links"><a class="button primary" id="community-link" target="_blank" rel="noopener noreferrer" hidden>Join the community</a><a href="https://wa.me/message/264FM6MC5QN3G1" target="_blank" rel="noopener noreferrer" id="community-support" class="button subtle">Support</a></div>
         <article class="panel"><h2>Official announcements</h2><div id="community-feed" class="event-list"></div></article>
       </section>
+      <section id="vip-view" hidden>
+        <div class="page-heading"><h1 id="vip-heading" tabindex="-1">👑 VIP Membership</h1><p class="muted">Upgrade your bot hosting experience using coins from your existing wallet.</p></div>
+        <article class="panel"><h2>Your VIP Membership</h2><div id="vip-account-status" class="vip-status" aria-live="polite"></div><div class="actions"><button id="vip-claim" class="button primary" type="button" hidden>Claim VIP daily bonus</button><button id="vip-auto-renew" class="button subtle" type="button" hidden>Enable auto renewal</button></div></article>
+        <div id="vip-plan-list" class="vip-plan-list"></div>
+        <article class="panel" id="vip-extras-panel" hidden><h2>Premium Tools</h2>
+          <form id="vip-branding-form" class="v3-form"><label for="vip-branding">Custom bot branding (Gold / Diamond)</label><input id="vip-branding" maxlength="60" placeholder="Custom bot display label"><button class="button subtle" type="submit">Save branding</button></form>
+          <div class="actions"><button id="vip-view-backups" class="button subtle" type="button">Manage Settings Backups</button><button id="vip-view-analytics" class="button subtle" type="button">Detailed Bot Analytics</button></div>
+          <div id="vip-tools-results" class="v3-stack"></div>
+        </article>
+      </section>
       <section id="profile-view" hidden>
         <div class="profile-header panel"><span id="profile-avatar" class="avatar"></span><h1 id="profile-heading" tabindex="-1">My Profile</h1><p id="profile-email" class="muted"></p><p id="profile-status" class="small"></p></div>
         <div class="profile-metrics">
@@ -376,6 +394,8 @@
           <div class="panels audit"><div id="staff-coin-history"><h3>Coin history</h3><ul class="history" id="selected-history"></ul></div><div id="founder-account-audit"><h3>Account actions</h3><ul class="history" id="selected-audit"></ul></div></div>
         </div>
         <div id="v3-admin-tools" class="v3-stack">
+          <details id="staff-vip-panel" class="panel" hidden><summary>👑 VIP Membership Management</summary><div id="staff-vip"></div></details>
+          <details id="staff-diagnostic-panel" class="panel" hidden><summary>🛠️ Pairing Diagnostics Center</summary><div id="staff-diagnostic"></div></details>
           <details id="staff-inbox-panel" class="panel" hidden><summary>Support inbox</summary><div id="staff-inbox"></div></details>
           <details id="staff-recovery-panel" class="panel" hidden><summary>Password Reset Approvals</summary><div id="staff-recovery"></div></details>
           <details id="staff-promos-panel" class="panel" hidden><summary>Promotional Coin Codes</summary><div id="staff-promos"></div></details>
