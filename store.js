@@ -590,14 +590,14 @@ class Store {
   }
   pendingRenewalNotices(){
     const now=this.clock();
-    return this.all(`SELECT d.id,d.phone,d.paid_until,p.email,d.user_id FROM deployments d
+    const rows=this.all(`SELECT d.*,u.coins,u.banned,p.email FROM deployments d
       JOIN users u ON u.id=d.user_id JOIN passwords p ON p.user_id=u.id
       LEFT JOIN renewal_notices n ON n.deployment_id=d.id AND n.paid_until=d.paid_until
-      WHERE d.intent='run' AND d.linked=1 AND u.banned=0 AND u.coins < ? * (
-        SELECT count(*) FROM deployments r WHERE r.user_id=d.user_id AND r.intent='run' AND r.linked=1
-        AND (r.paid_until<d.paid_until OR (r.paid_until=d.paid_until AND r.id<=d.id)))
-      AND d.paid_until>? AND d.paid_until<=? AND n.deployment_id IS NULL
-      ORDER BY d.paid_until,d.id`,PRICE,now,now+LOW_BALANCE_WINDOW);
+      WHERE d.intent='run' AND d.linked=1 AND u.banned=0 AND
+      d.paid_until>? AND d.paid_until<=? AND n.deployment_id IS NULL
+      ORDER BY d.paid_until,d.id`,now,now+LOW_BALANCE_WINDOW);
+    return rows.filter(d=>this.lowBalance(d,{id:d.user_id,coins:d.coins,banned:d.banned}))
+      .map(d=>({...d,rate:this.vip.rate(d.user_id)}));
   }
   markRenewalNotice(id,paidUntil){
     this.run(`INSERT INTO renewal_notices VALUES (?,?) ON CONFLICT(deployment_id)
