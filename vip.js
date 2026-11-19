@@ -69,13 +69,13 @@ class Vip {
     const total=this.s.get("SELECT COUNT(*) AS count FROM deployments WHERE user_id=? AND state<>'cancelled'",userId).count;
     return {tier:m?.tier||null,expires:m?.expiry||null,autoRenew:!!m?.auto_renew,
       duration:m?.duration||null,benefits:m?.benefits||null,branding:m?.branding||'',
-      activeSlots:total,slotLimit:Math.min(this.s.maxBots,5+(m?.benefits.slots||0)),
+      activeSlots:total,slotLimit:Math.min(this.s.maxBots,8+(m?.benefits.slots||0)),
       claimed:!!this.s.get('SELECT 1 FROM vip_claims WHERE user_id=? AND local_day=?',userId,this.day()),
       plans:this.plans().filter(p=>p.active).map(p=>({...p,badge:'/vip-'+p.tier+'.svg'}))};
   }
   day(){return Math.floor((this.s.clock()+3600000)/DAY);}
   rate(userId){const m=this.membership(userId);return Math.max(1,10-Math.floor((m?.benefits.discount||0)/10));}
-  slotLimit(userId){return Math.min(this.s.maxBots,5+(this.membership(userId)?.benefits.slots||0));}
+  slotLimit(userId){return Math.min(this.s.maxBots,8+(this.membership(userId)?.benefits.slots||0));}
   snapshot(plan){
     return {discount:plan.discount,daily:plan.daily,slots:plan.slots,themes:plan.themes,
       analyticsDays:plan.analytics_days,backups:plan.backups,bonusPercent:plan.bonus_percent,
