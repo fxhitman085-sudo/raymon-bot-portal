@@ -178,7 +178,7 @@ function draw(data){
       const card=element('article',undefined,'deployment');
       const icon=element('span',undefined,'deployment-icon');
       icon.setAttribute('aria-hidden','true');
-      const heading=element('h2','RAYMON BOT');
+      const heading=element('h2',user.vip?.branding||'RAYMON BOT');
       const title=element('div',undefined,'deployment-title');
       const state=user.banned?'suspended':bot.state;
       const status=element('span',names[state]||state,'bot-status');
