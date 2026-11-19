@@ -160,11 +160,12 @@ function draw(data){
   $('greeting').textContent=user.name;
   $('account-email').textContent=user.email;
   renderV3Access(user);
-  if(typeof renderVipAccess==='function')renderVipAccess(user);
+
   $('password-setup').hidden=!user.needsPassword||user.banned;
   $('balance').textContent=numberFormat.format(user.coins);
   renderOverview(data,deployments);
   renderProfile(user);
+  if(typeof renderVipAccess==='function')renderVipAccess(user);
   setUnread(data.unread||0);
   $('dashboard-deploy').hidden=user.banned;
   $('first-deploy').hidden=user.banned;
