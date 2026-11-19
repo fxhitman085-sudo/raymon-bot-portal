@@ -198,6 +198,36 @@ class PortalV3 {
         ORDER BY a.id DESC LIMIT 100`,Number(founder),id)
     };
   }
+  staffSearch(id,query=''){
+    if(!this.canManageLower(id))this.fail(403,'Staff management access required.');
+    const user=this.s.user(id),q=String(query||'').trim().toLowerCase().slice(0,100);
+    if(q.length<2)this.fail(400,'Enter at least two characters to search accounts.');
+    return this.s.all(`SELECT u.id,u.name,u.email,a.level,a.suspended
+      FROM users u LEFT JOIN v3_admins a ON a.user_id=u.id
+      LEFT JOIN portal_profiles p ON p.user_id=u.id
+      WHERE u.banned=0 AND p.closed_at IS NULL
+        AND u.id NOT IN (SELECT user_id FROM owner)
+        AND (? OR a.level IS NULL OR a.level<7)
+        AND (lower(u.name) LIKE ? OR lower(u.email) LIKE ?)
+      ORDER BY u.created DESC LIMIT 20`,Number(!!user.is_owner),'%'+q+'%','%'+q+'%');
+  }
+  overview(id){
+    const user=this.s.requireActive(id),permissions=this.role(user).permissions;
+    if(!user.is_owner&&!permissions.length)this.fail(403,'Administrative access required.');
+    const visible=p=>user.is_owner||permissions.includes(p);
+    const now=this.s.clock(),out={};
+    if(visible('users.view'))out.users=this.s.get('SELECT COUNT(*) AS value FROM users').value;
+    if(visible('deployments.view')){
+      out.bots=this.s.get("SELECT COUNT(*) AS total,COUNT(CASE WHEN state='online' AND last_seen>? THEN 1 END) AS online FROM deployments WHERE state<>'cancelled'",now-12000);
+      out.workerAvailable=this.s.workerSeen!==null&&this.s.workerSeen+15000>now;
+    }
+    if(visible('tickets.view'))out.tickets=this.s.get('SELECT COUNT(*) AS value FROM v3_tickets WHERE closed=0').value;
+    if(visible('coins.view'))out.coins=this.s.get("SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END),0) AS credited FROM ledger WHERE kind='coin_purchase'").credited;
+    if(user.is_owner)out.revenue=this.s.get("SELECT COALESCE(SUM(naira),0) AS value FROM v3_payments WHERE status='approved'").value;
+    if(visible('vip.view'))out.vip=this.s.get('SELECT COUNT(*) AS value FROM vip_memberships WHERE expiry>?',now).value;
+    if(this.canManageLower(id))out.staff=this.s.get('SELECT COUNT(*) AS value FROM v3_admins').value;
+    return out;
+  }
   setPermissions(id,{level,permissions}={}){
     return this.s.tx(()=>{
       this.permit(id,'founder');
@@ -210,11 +240,13 @@ class PortalV3 {
       this.audit(id,'admin.permissions',String(level),permissions.join(', ')||'All permissions cleared');
     });
   }
-  setStaff(id,{userId,action,level}={}){
+  setStaff(id,{userId,action,level,reason=''}={}){
     return this.s.tx(()=>{
       const actor=this.s.requireActive(id);
       if(!this.canManageLower(id))this.fail(403,'Staff management access required.');
       const founder=!!actor.is_owner;
+      if(typeof reason!=='string'||reason.length>180)this.fail(400,'Enter a reason under 180 characters.');
+      if(!founder&&!reason.trim())this.fail(400,'A reason is required for delegated staff changes.');
       const target=this.s.user(typeof userId==='string'?userId:'');
       if(!founder&&target?.id===actor.id)this.fail(403,'Administrators cannot modify their own appointment.');
       if(!target||target.is_owner)this.fail(404,'Select a regular account.');
@@ -234,7 +266,10 @@ class PortalV3 {
           this.s.run('UPDATE v3_admins SET suspended=? WHERE user_id=?',Number(action==='suspend'),target.id);
         }else this.fail(400,'Choose an administrator action.');
       }
-      this.audit(id,'admin.'+action,target.id,action==='level'?'Adm Lvl '+level:target.email);
+      const transition=action==='level'?'Adm Lvl '+(prior?.level||'none')+' → Adm Lvl '+level:
+        action==='remove'?'Adm Lvl '+prior.level+' → removed':
+        action+' Adm Lvl '+prior.level;
+      this.audit(id,'admin.'+action,target.id,transition+' · '+target.email+(reason.trim()?' · Reason: '+reason.trim():''));
     });
   }
   ticketInbox(id,staff,before){
