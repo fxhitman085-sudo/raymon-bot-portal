@@ -1083,3 +1083,34 @@ test('VIP themes enforce entitlements and support inbox prioritizes higher tiers
   store.vip.revoke(owner,member);
   assert.equal(store.vip.themeAllowed(member,'midnight'),false);
 });
+
+test('VIP HTTP endpoints enforce login, expose badge resources, and validate coin checkout',async t=>{
+  const {store,owner,member}=fixture(t);
+  store.putSession(member,'vip-session');
+  store.admin(owner,member,{action:'grant',amount:190,reason:'VIP checkout test'});
+  const origin='http://localhost:3000',server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const url=path=>'http://127.0.0.1:'+server.address().port+path;
+  const get=(path,cookie)=>fetch(url(path),{headers:cookie?{cookie}:undefined});
+  const post=(path,data,cookie)=>fetch(url(path),{method:'POST',headers:{origin,'Content-Type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)});
+  assert.equal((await get('/api/vip')).status,401);
+  for(const tier of ['silver','gold','diamond']){
+    const image=await get('/vip-'+tier+'.svg');
+    assert.equal(image.status,200);
+    assert.match(image.headers.get('content-type'),/image\/svg\+xml/);
+  }
+  assert.equal((await get('/vip-ui.js')).status,200);
+  const cookie='raymon=vip-session';
+  const before=await (await get('/api/vip',cookie)).json();
+  assert.equal(before.tier,null);
+  const bought=await post('/api/vip',{action:'buy',tier:'silver',duration:'weekly',autoRenew:false},cookie);
+  assert.equal(bought.status,200);
+  assert.equal((await bought.json()).cost,50);
+  const after=await (await get('/api/vip',cookie)).json();
+  assert.equal(after.tier,'silver');
+  assert.equal(store.user(member).coins,150);
+  assert.equal((await post('/api/vip',{action:'claim'},cookie)).status,200);
+  assert.equal((await post('/api/vip',{action:'claim'},cookie)).status,409);
+  assert.equal((await get('/api/owner/diagnostics',cookie)).status,403);
+});
