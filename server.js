@@ -389,7 +389,7 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         const data=await body(req), username=optionalUsername(data?.username);
         const name=typeof data?.name==='string'?data.name.trim():undefined;
         if((data?.name!==undefined&&(name===undefined||!name||name.length>90))||
-          (data?.theme!==undefined&&!['dark','light'].includes(data.theme)))throw new PortalError(400,'Check your profile fields.');
+          (data?.theme!==undefined&&!store.vip.themeAllowed(user.id,data.theme)))throw new PortalError(400,'Check your profile fields.');
         return json(res,200,store.dashboard(store.updateProfile(user.id,{username,name,theme:data?.theme})));
       }
       if(route==='/api/profile/avatar'){
