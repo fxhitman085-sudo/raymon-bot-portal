@@ -160,6 +160,7 @@ function draw(data){
   $('greeting').textContent=user.name;
   $('account-email').textContent=user.email;
   renderV3Access(user);
+  if(typeof renderVipAccess==='function')renderVipAccess(user);
   $('password-setup').hidden=!user.needsPassword||user.banned;
   $('balance').textContent=numberFormat.format(user.coins);
   renderOverview(data,deployments);
@@ -260,6 +261,8 @@ function draw(data){
   if(pending&&!d.code)details.push('Request expires '+formatDate(d.pairingExpires)+'.');
   $('connection-diagnostics').textContent=details.join(' ');
   $('connection-diagnostics').hidden=!details.length;
+  $('bot-diagnostics-panel').hidden=!d?.id;
+  $('diagnostic-report').replaceChildren();
   const historyKey=JSON.stringify(data.history);
   if($('history').dataset.rendered!==historyKey){
     fillHistory($('history'),data.history);
@@ -523,7 +526,7 @@ const workspacePages={
   home:['home-view','view-home','home-heading'],bots:['bot-view','view-bot','bots-heading'],
   deploy:['bot-view','view-deploy','manage-title'],wallet:['wallet-view','view-wallet','wallet-heading'],
   buy:['buy-view','view-buy','buy-heading'],community:['community-view','view-community','community-heading'],
-  profile:['profile-view','view-profile','profile-heading'],owner:['owner-view','view-owner','owner-heading'],
+  profile:['profile-view','view-profile','profile-heading'],vip:['vip-view','view-vip','vip-heading'],owner:['owner-view','view-owner','owner-heading'],
   rankings:['rankings-view','view-rankings','rankings-heading'],tickets:['tickets-view','view-tickets','tickets-heading']
 };
 function renderNavigation(){
@@ -552,6 +555,7 @@ function closeDrawer({restoreFocus=false}={}){
 }
 function switchView(view){
   workspaceView=view;
+  if(view==='vip'&&typeof loadVip==='function')loadVip().catch(error=>note(error.message,true));
   closeDrawer();
   renderNavigation();
   navigateTo(workspacePages[view][2]);
@@ -595,7 +599,7 @@ document.addEventListener('keydown',event=>{
 });
 $('view-bot').addEventListener('click',showBots);
 $('back-to-bots').addEventListener('click',showBots);
-for(const [id,view] of [['view-home','home'],['view-wallet','wallet'],['dashboard-wallet','wallet'],['view-buy','buy'],['wallet-buy','buy'],['buy-back','home'],['view-profile','profile'],['avatar-button','profile']]){
+for(const [id,view] of [['view-vip','vip'],['view-home','home'],['view-wallet','wallet'],['dashboard-wallet','wallet'],['view-buy','buy'],['wallet-buy','buy'],['buy-back','home'],['view-profile','profile'],['avatar-button','profile']]){
   $(id).addEventListener('click',()=>switchView(view));
 }
 $('view-owner').addEventListener('click',()=>action($('view-owner'),async()=>{
