@@ -27,7 +27,9 @@ function renderV3Access(user){
   $('search-form').hidden=$('staff-accounts').hidden=!canAccounts();
   $('staff-coin-heading').hidden=!can('coins.view');
   $('staff-announcements').hidden=!can('announcements.publish');
-  $('founder-rewards').hidden=$('founder-staff-panel').hidden=$('founder-audit-panel').hidden=!user.isOwner;
+  $('founder-rewards').hidden=!user.isOwner;
+  $('founder-staff-panel').hidden=$('founder-audit-panel').hidden=!(user.isOwner||can('staff.manage.lower'));
+  if(typeof cc4Access==='function')cc4Access(user);
   $('staff-inbox-panel').hidden=!can('tickets.view');
   $('staff-recovery-panel').hidden=!can('passwords.review');
   $('staff-promos-panel').hidden=!can('promos.view');
@@ -52,7 +54,7 @@ function renderAdminAccountControls(target){
     appoint.querySelector('form')?.remove();
     appoint.dataset.account=target.id;
   }
-  appoint.hidden=!founder||!!target.founder||!!target.closed_at||!!target.banned;
+  appoint.hidden=!(founder||can('staff.manage.lower'))||!!target.founder||!!target.closed_at||!!target.banned;
 }
 async function openAdminDashboard(){
   switchView('owner');
@@ -426,12 +428,15 @@ bindPanel('staff-recovery-panel',loadRecoveryApprovals);
 let editLevel=1;
 function levelSelect(value){
   const select=element('select');
-  for(let level=1;level<=7;level++)select.append(new Option('Adm Lvl '+level,String(level)));
+  for(let level=1;level<=(current?.user?.isOwner?7:6);level++)select.append(new Option('Adm Lvl '+level,String(level)));
   select.value=String(value);
   return select;
 }
 async function staffChange(id,command,level){
-  await request(v3Path('staff'),{userId:id,action:command,level});
+  const delegated=!current.user.isOwner;
+  const reason=delegated?window.prompt('Reason for this administrator change (required):'):'';
+  if(delegated&&(!reason||!reason.trim()))return;
+  await request(v3Path('staff'),{userId:id,action:command,level,reason:reason||''});
   await loadStaff();
   if(canAccounts())await ownerList();
   note('Administrator updated.');
@@ -450,33 +455,77 @@ $('appoint-from-user').addEventListener('click',()=>{
   $('appoint-area').querySelector('select').focus();
 });
 async function loadStaff(){
-  const {levels,permissions,admins,audit}=await request(v3Path('staff'));
+  const {levels,permissions,admins,audit,canEditPermissions}=await request(v3Path('staff'));
   const host=$('founder-staff'),auditHost=$('founder-audit');
-  const form=element('form',undefined,'v3-form');
-  const select=v3Field(form,'Level to configure',levelSelect(editLevel));
-  const options=element('fieldset',undefined,'v3-permissions');
-  options.append(element('legend','Permissions for this level'));
-  const description=element('p','Each level has its own permissions. Ticket replies, assignment, and closing also require inbox access.','small');
-  const checkboxes={};
-  for(const [key,label] of Object.entries(permissions)){
-    const box=v3Input('checkbox');
-    const wrapper=element('label',label,'reward-toggle');wrapper.prepend(box);options.append(wrapper);checkboxes[key]=box;
+  host.replaceChildren();
+  if(canEditPermissions){
+    const form=element('form',undefined,'v3-form');
+    const select=v3Field(form,'Administrator level to configure',levelSelect(editLevel));
+    const options=element('div',undefined,'cc4-permission-groups');
+    const categories=[
+      ['User Management',['users.','coins.']],
+      ['Bot Operations',['deployments.','diagnostics.']],
+      ['Support & Recovery',['tickets.','passwords.']],
+      ['Financial & VIP',['vip.']],
+      ['Marketing & Platform',['promos.','referrals.','announcements.']],
+      ['Staff Administration',['staff.']]
+    ];
+    const checkboxes={};
+    for(const [heading,prefixes] of categories){
+      const box=element('fieldset',undefined,'cc4-permission-category');
+      box.append(element('legend',heading));
+      for(const [key,label] of Object.entries(permissions).filter(([key])=>prefixes.some(prefix=>key.startsWith(prefix)))){
+        const tick=v3Input('checkbox');
+        const wrapper=element('label',label,'reward-toggle');
+        wrapper.prepend(tick);
+        box.append(wrapper);checkboxes[key]=tick;
+      }
+      options.append(box);
+    }
+    function selectLevel(){
+      editLevel=Number(select.value);
+      const assigned=new Set(levels.filter(row=>row.level===editLevel).map(row=>row.permission));
+      for(const [key,box] of Object.entries(checkboxes))box.checked=assigned.has(key);
+    }
+    select.addEventListener('change',selectLevel);
+    selectLevel();
+    form.append(element('p','Only the Founder can change level-wide permissions. Level 7 delegation can be switched off here.','small'),options);
+    v3Submit(form,'Save role permissions',async()=>{
+      const selected=Object.keys(checkboxes).filter(key=>checkboxes[key].checked);
+      if(!window.confirm('Save '+selected.length+' permissions for Adm Lvl '+select.value+'? This changes access for all administrators in that level.'))return;
+      await request(v3Path('permissions'),{level:Number(select.value),permissions:selected});
+      await loadStaff();await refresh();note('Role permissions saved and enforced.');
+    });
+    const roleRegion=element('div',undefined,'cc4-role-region');
+    roleRegion.append(element('h3','Role & Permission Editor'),form);
+    host.append(roleRegion);
   }
-  function selectLevel(){
-    editLevel=Number(select.value);
-    const assigned=new Set(levels.filter(row=>row.level===editLevel).map(row=>row.permission));
-    for(const [key,box] of Object.entries(checkboxes))box.checked=assigned.has(key);
-  }
-  select.addEventListener('change',selectLevel);selectLevel();
-  form.append(description,options);
-  v3Submit(form,'Save level permissions',async()=>{
-    await request(v3Path('permissions'),{level:Number(select.value),permissions:Object.keys(checkboxes).filter(key=>checkboxes[key].checked)});
-    await loadStaff();note('Level permissions saved.');
+  const dirRegion=element('div',undefined,'cc4-directory-region');
+  dirRegion.append(element('h3','Staff Directory'),element('p',canEditPermissions?
+    'Appoint and manage administrator levels 1–7.':
+    'Delegated authority: manage Levels 1–6 only. You cannot modify yourself or other Level 7 administrators.','small'));
+  const searchBox=element('div',undefined,'cc4-staff-search');
+  const searchForm=element('form',undefined,'v3-form');
+  const searchInput=v3Input('search',{placeholder:'Search account name or email',maxLength:100,required:true,minLength:2});
+  v3Field(searchForm,'Appoint an existing user',searchInput);
+  const results=element('div',undefined,'cc4-staff-search-results');
+  v3Submit(searchForm,'Search accounts',async()=>{
+    const {accounts}=await request(v3Path('staff-search',{search:searchInput.value.trim()}));
+    results.replaceChildren();
+    if(!accounts.length)results.append(element('p','No eligible accounts matched.','muted'));
+    for(const account of accounts){
+      const row=element('div',undefined,'cc4-staff-result');
+      row.append(element('strong',account.name),element('p',account.email+(account.level?' · Adm Lvl '+account.level:''),'small'));
+      if(!account.level)row.append(appointForm(account.id,account.name,1));
+      else row.append(element('p','Already appointed. Manage the administrator below.','small'));
+      results.append(row);
+    }
   });
-  host.replaceChildren(form,element('h3','Appointed administrators'),element('p','To appoint someone, find their account above and choose Manage.','small'));
-  if(!admins.length)host.append(element('p','No administrators appointed.','muted'));
+  searchBox.append(searchForm,results);
+  dirRegion.append(searchBox);
+  if(!admins.length)dirRegion.append(element('p','No administrators appointed.','muted'));
   for(const admin of admins){
-    const card=element('details',undefined,'v3-record');
+    const card=element('details',undefined,'v3-record cc4-staff-card');
     card.append(element('summary',admin.name+' · Adm Lvl '+admin.level+(admin.suspended?' · Suspended':'')));
     card.append(element('p',admin.email,'small'));
     if(!admin.closed&&!admin.banned)card.append(appointForm(admin.id,admin.name,admin.level));
@@ -486,10 +535,11 @@ async function loadStaff(){
     actions.append(v3Button('Remove administrator',async()=>{
       if(window.confirm('Remove administrator access for '+admin.name+'?'))await staffChange(admin.id,'remove');
     },'danger'));
-    card.append(actions);host.append(card);
+    card.append(actions);dirRegion.append(card);
   }
+  host.append(dirRegion);
   auditHost.replaceChildren();
-  if(!audit.length)v3Text(auditHost,'No admin activity recorded.');
+  if(!audit.length)v3Text(auditHost,'No administration activity recorded.');
   for(const row of audit){
     const entry=element('article',undefined,'v3-record');
     entry.append(element('strong',row.action.replaceAll('.',' · ')),element('p',row.summary,'v3-copy'),

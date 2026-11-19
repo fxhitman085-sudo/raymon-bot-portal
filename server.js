@@ -12,7 +12,7 @@ const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
 
 const random=()=>randomBytes(32).toString('base64url');
-const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/vip-silver.svg',['vip-silver.svg','image/svg+xml']],['/vip-gold.svg',['vip-gold.svg','image/svg+xml']],['/vip-diamond.svg',['vip-diamond.svg','image/svg+xml']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
+const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/cc4.js',['cc4.js','text/javascript; charset=utf-8']],['/vip-silver.svg',['vip-silver.svg','image/svg+xml']],['/vip-gold.svg',['vip-gold.svg','image/svg+xml']],['/vip-diamond.svg',['vip-diamond.svg','image/svg+xml']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
 const equal=(left,right)=>typeof left==='string'&&typeof right==='string'&&Buffer.byteLength(left)===Buffer.byteLength(right)&&timingSafeEqual(Buffer.from(left),Buffer.from(right));
 const cookieValue=(req,name)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith(name+'='))?.slice(name.length+1);
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));};
@@ -133,6 +133,8 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
     }
     else if(route==='packages')json(res,200,{packages:v3.packages(id,query('manage')==='1')});
     else if(route==='staff')json(res,200,v3.staff(id));
+    else if(route==='staff-search')json(res,200,{accounts:v3.staffSearch(id,query('search'))});
+    else if(route==='overview')json(res,200,v3.overview(id));
     else if(route==='rankings')json(res,200,v3.rankings(id,period,previous));
     else if(route==='referrals')json(res,200,v3.referralAdmin(id,period,previous));
     else if(route==='promos'){
