@@ -1,4 +1,6 @@
 const community=require('./community');
+const {Vip}=require('./vip');
+const {Diagnostics}=require('./pairing-diagnostics');
 const {Recovery}=require('./recovery');
 const {DEFAULTS,validate,groupId,groupOptions}=require('./bot-settings');
 const {DatabaseSync}=require('node:sqlite');
@@ -139,6 +141,8 @@ class Store {
       }
     });
     this.v3=new PortalV3(this,PortalError);
+    this.vip=new Vip(this,PortalError);
+    this.diagnostics=new Diagnostics(this,PortalError);
     this.recovery=new Recovery(this);
     community.init(this);
   }
@@ -420,11 +424,13 @@ class Store {
       if(current?.linked)throw new PortalError(409,'Your WhatsApp is already linked. Use Resume bot.');
       if(current?.intent==='pair'&&current.pair_until>now&&current.phone===phone)return;
       if(current&&current.requested+45_000>now)throw new PortalError(429,'Wait 45 seconds between pairing attempts.');
-      if(user.coins<PRICE&&!(current?.paid_until>now))throw new PortalError(409,'You need at least 10 coins to start.');
+      if(user.coins<this.vip.rate(userId)&&!(current?.paid_until>now))throw new PortalError(409,'You need enough coins to start this bot.');
       if((phone!==current?.verified_phone&&this.get('SELECT 1 FROM verified_numbers WHERE phone=?',phone))||
         this.get("SELECT 1 FROM deployments WHERE phone=? AND id<>? AND intent='pair' AND pair_until>?",phone,current?.id||'',now))
         throw new PortalError(409,'This WhatsApp number is registered or already being paired.');
       this.checkCapacity(current?.id);
+      const activeCount=this.deployments(userId).filter(bot=>bot.id!==current?.id).length;
+      if(activeCount>=this.vip.slotLimit(userId))throw new PortalError(409,'Your bot slot allowance is full. Upgrade VIP or cancel an unused bot.');
       const botId=current?.id||randomUUID(),generation=randomUUID();
       this.run(`INSERT INTO deployments (id,user_id,phone,generation,intent,state,pair_until,requested)
         VALUES (?,?,?,?,'pair','queued',?,?)
@@ -495,9 +501,9 @@ class Store {
   }
   checkCapacity(id){
     const now=this.clock();
-    const {count}=this.get(`SELECT COUNT(*) AS count FROM deployments d JOIN users u ON u.id=d.user_id
-      WHERE d.id<>? AND u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
-      (d.intent='run' AND (d.paid_until>? OR u.coins>=?)))`,id||'',now,now,PRICE);
+    const running=this.all(`SELECT d.*,u.coins FROM deployments d JOIN users u ON u.id=d.user_id
+      WHERE d.id<>? AND u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR d.intent='run')`,id||'',now);
+    const count=running.filter(d=>d.paid_until>now||d.coins>=this.vip.rate(d.user_id)).length;
     if(count>=this.maxBots)throw new PortalError(503,'All bot slots are currently occupied. Try again later.');
   }
   cancel(d){
@@ -518,7 +524,7 @@ class Store {
         if(d.intent!=='pause')this.event(userId,d.id,'Bot paused','The deployment was paused from the portal.');
       }else if(action==='restart'){
         if(!d.linked||d.intent!=='run')throw new PortalError(409,'Start the linked bot before restarting it.');
-        if(d.paid_until<=now&&user.coins<PRICE)throw new PortalError(409,'Your bot needs coins before it can restart.');
+        if(d.paid_until<=now&&user.coins<this.vip.rate(userId))throw new PortalError(409,'Your bot needs coins before it can restart.');
         const prior=this.get('SELECT requested FROM portal_restart WHERE deployment_id=?',d.id);
         if(prior&&prior.requested+15_000>now)throw new PortalError(429,'A restart was requested recently.');
         this.run(`INSERT INTO portal_restart VALUES (?,?,?) ON CONFLICT(deployment_id)
@@ -527,7 +533,7 @@ class Store {
         this.event(userId,d.id,'Restart requested','The worker will reconnect this deployment with its saved session.');
       }else if(action==='resume'){
         if(!d.linked)throw new PortalError(409,'You need to pair your WhatsApp again.');
-        if(d.paid_until<=now&&user.coins<PRICE)throw new PortalError(409,'You need at least 10 coins to resume.');
+        if(d.paid_until<=now&&user.coins<this.vip.rate(userId))throw new PortalError(409,'You need enough coins to resume.');
         this.checkCapacity(d.id);
         if(d.intent!=='run')this.run("UPDATE deployments SET intent='run',state='connecting',last_seen=0 WHERE id=?",d.id);
       }else throw new PortalError(400,'Unknown bot action.');
@@ -572,7 +578,7 @@ class Store {
   state(d,user,now=this.clock()){
     if(user.banned)return 'suspended';
     if(d.intent==='pair'&&d.pair_until<=now)return 'expired';
-    if(d.intent==='run'&&d.paid_until<=now&&user.coins<PRICE)return 'low_balance';
+    if(d.intent==='run'&&d.paid_until<=now&&user.coins<this.vip.rate(user.id))return 'low_balance';
     if(d.intent==='run'&&(d.state==='connecting'||(d.state==='online'&&d.last_seen+12_000<=now)))return 'reconnecting';
     return d.state;
   }
@@ -580,7 +586,7 @@ class Store {
     if(user.banned||d.intent!=='run'||!d.linked||d.paid_until<=now||d.paid_until>now+LOW_BALANCE_WINDOW)return false;
     const {n}=this.get(`SELECT count(*) AS n FROM deployments WHERE user_id=? AND intent='run' AND linked=1
       AND (paid_until<? OR (paid_until=? AND id<=?))`,user.id,d.paid_until,d.paid_until,d.id);
-    return user.coins<n*PRICE;
+    return user.coins<n*this.vip.rate(user.id);
   }
   pendingRenewalNotices(){
     const now=this.clock();
@@ -621,12 +627,12 @@ class Store {
       username:user.username,theme:user.theme||'dark',created:user.created,referralCode:user.referral_code,
       avatarVersion:this.get('SELECT version FROM portal_avatars WHERE user_id=?',user.id)?.version||null,
       banned:!!user.banned,needsPassword:!this.hasPassword(user.id),staff:this.v3.role(user),
-      onboarding:this.v3.onboarding(user.id)},capacity:{used,accountUsed,total:this.maxBots},
+      onboarding:this.v3.onboarding(user.id),vip:this.vip.status(user.id)},capacity:{used,accountUsed,total:this.maxBots},
       unread:this.notices(user).filter(row=>!row.read).length,workerAvailable:this.workerSeen!==null&&this.workerSeen+15_000>now,
       dailyBonus,referralProgram:{enabled:!!rewards.referralEnabled,inviterAmount:rewards.inviterAmount,
         inviteeAmount:rewards.inviteeAmount,trigger:rewards.referralTrigger,
         ownBonus:ownReferral||null,...this.referralStats(user.id)},
-      deployment:deployments[0]||null,deployments,history:this.history(user.id),price:PRICE};
+      deployment:deployments[0]||null,deployments,history:this.history(user.id),price:this.vip.rate(user.id)};
   }
   history(id){return this.all('SELECT delta,kind,reason,created FROM ledger WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id);}
   ownerData(search='',id,{phoneSearch=true}={}){
@@ -673,9 +679,10 @@ class Store {
       for(const [id,task] of this.groupRequests)if(task.expires<=now)this.groupRequests.delete(id);
       for(const report of reports)this.report(report,now);
       const active=this.all(`SELECT d.*,u.coins FROM deployments d JOIN users u ON u.id=d.user_id
-        WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>? AND (u.coins>=? OR d.paid_until>?)) OR
-        (d.intent='run' AND d.linked=1 AND (d.paid_until>? OR u.coins>=?)))
-        ORDER BY (d.state='online') DESC,d.requested LIMIT ?`,now,PRICE,now,now,PRICE,this.maxBots);
+        WHERE u.banned=0 AND ((d.intent='pair' AND d.pair_until>?) OR
+        (d.intent='run' AND d.linked=1))
+        ORDER BY (d.state='online') DESC,d.requested`,now)
+        .filter(d=>d.paid_until>now||d.coins>=this.vip.rate(d.user_id)).slice(0,this.maxBots);
       return active.map(d=>{
         const settings=this.get('SELECT revision,patch FROM bot_settings WHERE deployment_id=?',d.id);
         const groups=this.groupRequests.get(d.id);
@@ -740,8 +747,9 @@ class Store {
       this.codes.delete(d.id);
       if(d.state!=='online')this.event(d.user_id,d.id,'Bot connected','WhatsApp confirmed the deployment is connected.');
       let paidUntil=d.paid_until;
-      if(paidUntil<=now&&user.coins>=PRICE){
-        this.credit(user.id,-PRICE,'uptime','24 hours of bot access');
+      const charge=this.vip.rate(user.id);
+      if(paidUntil<=now&&user.coins>=charge){
+        this.credit(user.id,-charge,'uptime','24 hours of bot access');
         paidUntil=now+DAY;
       }
       this.run("UPDATE deployments SET intent='run',state='online',linked=1,paid_until=?,pair_until=0,last_seen=? WHERE id=?",paidUntil,now,d.id);
