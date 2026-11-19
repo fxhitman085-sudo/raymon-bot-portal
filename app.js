@@ -160,10 +160,12 @@ function draw(data){
   $('greeting').textContent=user.name;
   $('account-email').textContent=user.email;
   renderV3Access(user);
+
   $('password-setup').hidden=!user.needsPassword||user.banned;
   $('balance').textContent=numberFormat.format(user.coins);
   renderOverview(data,deployments);
   renderProfile(user);
+  if(typeof renderVipAccess==='function')renderVipAccess(user);
   setUnread(data.unread||0);
   $('dashboard-deploy').hidden=user.banned;
   $('first-deploy').hidden=user.banned;
@@ -177,7 +179,7 @@ function draw(data){
       const card=element('article',undefined,'deployment');
       const icon=element('span',undefined,'deployment-icon');
       icon.setAttribute('aria-hidden','true');
-      const heading=element('h2','RAYMON BOT');
+      const heading=element('h2',user.vip?.branding||'RAYMON BOT');
       const title=element('div',undefined,'deployment-title');
       const state=user.banned?'suspended':bot.state;
       const status=element('span',names[state]||state,'bot-status');
@@ -260,6 +262,8 @@ function draw(data){
   if(pending&&!d.code)details.push('Request expires '+formatDate(d.pairingExpires)+'.');
   $('connection-diagnostics').textContent=details.join(' ');
   $('connection-diagnostics').hidden=!details.length;
+  $('bot-diagnostics-panel').hidden=!d?.id;
+  $('diagnostic-report').replaceChildren();
   const historyKey=JSON.stringify(data.history);
   if($('history').dataset.rendered!==historyKey){
     fillHistory($('history'),data.history);
@@ -523,7 +527,7 @@ const workspacePages={
   home:['home-view','view-home','home-heading'],bots:['bot-view','view-bot','bots-heading'],
   deploy:['bot-view','view-deploy','manage-title'],wallet:['wallet-view','view-wallet','wallet-heading'],
   buy:['buy-view','view-buy','buy-heading'],community:['community-view','view-community','community-heading'],
-  profile:['profile-view','view-profile','profile-heading'],owner:['owner-view','view-owner','owner-heading'],
+  profile:['profile-view','view-profile','profile-heading'],vip:['vip-view','view-vip','vip-heading'],owner:['owner-view','view-owner','owner-heading'],
   rankings:['rankings-view','view-rankings','rankings-heading'],tickets:['tickets-view','view-tickets','tickets-heading']
 };
 function renderNavigation(){
@@ -552,6 +556,7 @@ function closeDrawer({restoreFocus=false}={}){
 }
 function switchView(view){
   workspaceView=view;
+  if(view==='vip'&&typeof loadVip==='function')loadVip().catch(error=>note(error.message,true));
   closeDrawer();
   renderNavigation();
   navigateTo(workspacePages[view][2]);
@@ -595,7 +600,7 @@ document.addEventListener('keydown',event=>{
 });
 $('view-bot').addEventListener('click',showBots);
 $('back-to-bots').addEventListener('click',showBots);
-for(const [id,view] of [['view-home','home'],['view-wallet','wallet'],['dashboard-wallet','wallet'],['view-buy','buy'],['wallet-buy','buy'],['buy-back','home'],['view-profile','profile'],['avatar-button','profile']]){
+for(const [id,view] of [['view-vip','vip'],['view-home','home'],['view-wallet','wallet'],['dashboard-wallet','wallet'],['view-buy','buy'],['wallet-buy','buy'],['buy-back','home'],['view-profile','profile'],['avatar-button','profile']]){
   $(id).addEventListener('click',()=>switchView(view));
 }
 $('view-owner').addEventListener('click',()=>action($('view-owner'),async()=>{
@@ -799,6 +804,10 @@ function initials(name){
   return name.trim().split(/\s+/).slice(0,2).map(word=>[...word][0]).join('').toUpperCase();
 }
 function renderProfile(user){
+  for(const option of $('theme-select').options){
+    option.disabled=!['dark','light'].includes(option.value)&&!user.vip?.allowedThemes?.includes(option.value);
+    option.hidden=option.disabled;
+  }
   const stamp=JSON.stringify([user.name,user.username,user.email,user.theme]);
   if(stamp!==profileUser){
     profileUser=stamp;

@@ -1001,3 +1001,116 @@ test('custom package prices and activation survive restart without reseeding the
   assert.equal(store.v3.packages(owner).find(row=>row.id===custom.packageId).coins,300);
   assert.equal(store.v3.packages(owner,true).length,4);
 });
+
+
+test('VIP memberships charge coins, apply hosting discounts and award daily bonuses once',t=>{
+  const {store,owner,member,advance}=fixture(t);
+  store.admin(owner,member,{action:'grant',amount:400,reason:'Fund VIP'});
+  assert.equal(store.vip.rate(member),10);
+  assert.throws(()=>store.vip.claim(member),{status:409});
+  const bought=store.vip.buy(member,{tier:'gold',duration:'weekly',autoRenew:true});
+  assert.equal(bought.cost,150);
+  assert.equal(store.vip.rate(member),8);
+  assert.equal(store.vip.membership(member).tier,'gold');
+  assert.equal(store.vip.claim(member).amount,5);
+  assert.throws(()=>store.vip.claim(member),{status:409});
+  store.pair(member,phone);
+  store.sync([report(store.deployment(member),'online')]);
+  const charged=store.history(member).find(row=>row.kind==='uptime');
+  assert.equal(charged.delta,-8);
+  const beforeRenew=store.user(member).coins;
+  advance(7*DAY+1);
+  store.vip.tick();
+  assert.equal(store.user(member).coins,beforeRenew-150);
+  assert.equal(store.vip.rate(member),8);
+  store.vip.setRenewal(member,false);
+  assert.equal(store.vip.status(member).autoRenew,false);
+  const claimed=store.vip.claim(member);
+  assert.equal(claimed.amount,5);
+  assert.equal(store.vip.purchaseBonus(member,100,randomUUID()),5);
+});
+
+test('VIP plan edit rights, backups, member grants and pairing diagnostics stay account-isolated',t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'vip-other@example.com',name:'Other',digest:'test'}).id;
+  assert.throws(()=>store.vip.configure(member,{tier:'silver'}),{status:403});
+  const plan=store.vip.config('silver');
+  store.vip.configure(owner,{tier:'silver',weekly:plan.weekly,monthly:plan.monthly,
+    discount:plan.discount,daily:plan.daily,slots:plan.slots,themes:plan.themes,
+    analyticsDays:plan.analytics_days,backups:plan.backups,bonusPercent:plan.bonus_percent,
+    early:plan.early,active:true});
+  store.vip.grant(owner,{userId:member,tier:'silver',days:30});
+  assert.equal(store.vip.status(member).tier,'silver');
+  store.pair(member,phone);
+  const bot=store.deployment(member);
+  const backup=store.vip.backup(member,bot.id);
+  assert.ok(backup.id);
+  assert.equal(store.vip.backups(member).length,1);
+  assert.throws(()=>store.vip.restore(other,backup.id),{status:403});
+  assert.equal(store.vip.restore(member,backup.id).ok,true);
+  const reportResult=store.diagnostics.report(member,bot.id);
+  assert.equal(reportResult.workerAvailable,false);
+  assert.equal(reportResult.issue.title,'Pairing worker unavailable');
+  assert.throws(()=>store.diagnostics.report(other,bot.id),{status:404});
+  assert.throws(()=>store.diagnostics.fleet(other),{status:403});
+  const fleet=store.diagnostics.fleet(owner);
+  assert.equal(fleet.workerAvailable,false);
+  store.vip.revoke(owner,member);
+  assert.equal(store.vip.rate(member),10);
+});
+
+
+test('VIP themes enforce entitlements and support inbox prioritizes higher tiers',t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'vip-ordinary@example.com',name:'Ordinary',digest:'test'}).id;
+  assert.equal(store.vip.themeAllowed(member,'midnight'),false);
+  store.vip.grant(owner,{userId:member,tier:'silver',days:14});
+  assert.equal(store.vip.themeAllowed(member,'midnight'),true);
+  assert.equal(store.vip.themeAllowed(member,'gold'),false);
+  store.vip.grant(owner,{userId:member,tier:'gold',days:10});
+  assert.equal(store.vip.themeAllowed(member,'gold'),true);
+  const when=store.clock();
+  store.run('INSERT INTO v3_tickets VALUES (?,?,?,NULL,0,?,?)',
+    randomUUID(),other,'Standard ticket',when,when+1000);
+  store.run('INSERT INTO v3_tickets VALUES (?,?,?,NULL,0,?,?)',
+    randomUUID(),member,'Gold ticket',when,when);
+  const inbox=store.v3.ticketInbox(owner,true);
+  assert.equal(inbox[0].subject,'Gold ticket');
+  assert.equal(inbox[0].priorityRank,2);
+  assert.equal(inbox[1].priorityRank,0);
+  const after=store.v3.ticketInbox(owner,true,{rank:inbox[0].priorityRank,stamp:inbox[0].updated,id:inbox[0].id});
+  assert.equal(after[0].subject,'Standard ticket');
+  store.vip.revoke(owner,member);
+  assert.equal(store.vip.themeAllowed(member,'midnight'),false);
+});
+
+test('VIP HTTP endpoints enforce login, expose badge resources, and validate coin checkout',async t=>{
+  const {store,owner,member}=fixture(t);
+  store.putSession(member,'vip-session');
+  store.admin(owner,member,{action:'grant',amount:190,reason:'VIP checkout test'});
+  const origin='http://localhost:3000',server=createServer({store,origin,workerToken:'w'.repeat(40)});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const url=path=>'http://127.0.0.1:'+server.address().port+path;
+  const get=(path,cookie)=>fetch(url(path),{headers:cookie?{cookie}:undefined});
+  const post=(path,data,cookie)=>fetch(url(path),{method:'POST',headers:{origin,'Content-Type':'application/json',...(cookie?{cookie}:{})},body:JSON.stringify(data)});
+  assert.equal((await get('/api/vip')).status,401);
+  for(const tier of ['silver','gold','diamond']){
+    const image=await get('/vip-'+tier+'.svg');
+    assert.equal(image.status,200);
+    assert.match(image.headers.get('content-type'),/image\/svg\+xml/);
+  }
+  assert.equal((await get('/vip-ui.js')).status,200);
+  const cookie='raymon=vip-session';
+  const before=await (await get('/api/vip',cookie)).json();
+  assert.equal(before.tier,null);
+  const bought=await post('/api/vip',{action:'buy',tier:'silver',duration:'weekly',autoRenew:false},cookie);
+  assert.equal(bought.status,200);
+  assert.equal((await bought.json()).cost,50);
+  const after=await (await get('/api/vip',cookie)).json();
+  assert.equal(after.tier,'silver');
+  assert.equal(store.user(member).coins,150);
+  assert.equal((await post('/api/vip',{action:'claim'},cookie)).status,200);
+  assert.equal((await post('/api/vip',{action:'claim'},cookie)).status,409);
+  assert.equal((await get('/api/owner/diagnostics',cookie)).status,403);
+});
