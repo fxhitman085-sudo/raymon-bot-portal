@@ -8,6 +8,7 @@ const defaults=[
   ['diamond','Diamond',400,1500,30,10,3,20,90,10,10,3]
 ];
 const tiers=['silver','gold','diamond'];
+const premiumThemes=['midnight','silver','gold','ocean','royal','diamond','graphite'];
 function tierRank(tier){return tiers.indexOf(tier)+1;}
 function cleanBrand(x){
   if(typeof x!=='string'||x.length>60||!x.trim()||/[\x00-\x1f<>]/.test(x))
@@ -64,11 +65,17 @@ class Vip {
     if(!row||row.expiry<=this.s.clock())return null;
     return {...row,benefits:JSON.parse(row.snapshot)};
   }
+  themeAllowed(userId,theme){
+    if(['dark','light'].includes(theme))return true;
+    const membership=this.membership(userId);
+    return !!membership&&premiumThemes.slice(0,membership.benefits.themes).includes(theme);
+  }
   status(userId){
     const m=this.membership(userId);
     const total=this.s.get("SELECT COUNT(*) AS count FROM deployments WHERE user_id=? AND state<>'cancelled'",userId).count;
     return {tier:m?.tier||null,expires:m?.expiry||null,autoRenew:!!m?.auto_renew,
       duration:m?.duration||null,benefits:m?.benefits||null,branding:m?.branding||'',
+      allowedThemes:premiumThemes.slice(0,m?.benefits.themes||0),
       activeSlots:total,slotLimit:Math.min(this.s.maxBots,8+(m?.benefits.slots||0)),
       claimed:!!this.s.get('SELECT 1 FROM vip_claims WHERE user_id=? AND local_day=?',userId,this.day()),
       plans:this.plans().filter(p=>p.active).map(p=>({...p,badge:'/vip-'+p.tier+'.svg'}))};
