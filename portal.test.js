@@ -1001,3 +1001,60 @@ test('custom package prices and activation survive restart without reseeding the
   assert.equal(store.v3.packages(owner).find(row=>row.id===custom.packageId).coins,300);
   assert.equal(store.v3.packages(owner,true).length,4);
 });
+
+
+test('VIP memberships charge coins, apply hosting discounts and award daily bonuses once',t=>{
+  const {store,owner,member,advance}=fixture(t);
+  store.admin(owner,member,{action:'grant',amount:400,reason:'Fund VIP'});
+  assert.equal(store.vip.rate(member),10);
+  assert.throws(()=>store.vip.claim(member),{status:409});
+  const bought=store.vip.buy(member,{tier:'gold',duration:'weekly',autoRenew:true});
+  assert.equal(bought.cost,150);
+  assert.equal(store.vip.rate(member),8);
+  assert.equal(store.vip.membership(member).tier,'gold');
+  assert.equal(store.vip.claim(member).amount,5);
+  assert.throws(()=>store.vip.claim(member),{status:409});
+  store.pair(member,phone);
+  store.sync([report(store.deployment(member),'online')]);
+  const charged=store.history(member).find(row=>row.kind==='uptime');
+  assert.equal(charged.delta,-8);
+  const beforeRenew=store.user(member).coins;
+  advance(7*DAY+1);
+  store.vip.tick();
+  assert.equal(store.user(member).coins,beforeRenew-150);
+  assert.equal(store.vip.rate(member),8);
+  store.vip.setRenewal(member,false);
+  assert.equal(store.vip.status(member).autoRenew,false);
+  const claimed=store.vip.claim(member);
+  assert.equal(claimed.amount,5);
+  assert.equal(store.vip.purchaseBonus(member,100,randomUUID()),5);
+});
+
+test('VIP plan edit rights, backups, member grants and pairing diagnostics stay account-isolated',t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'vip-other@example.com',name:'Other',digest:'test'}).id;
+  assert.throws(()=>store.vip.configure(member,{tier:'silver'}),{status:403});
+  const plan=store.vip.config('silver');
+  store.vip.configure(owner,{tier:'silver',weekly:plan.weekly,monthly:plan.monthly,
+    discount:plan.discount,daily:plan.daily,slots:plan.slots,themes:plan.themes,
+    analyticsDays:plan.analytics_days,backups:plan.backups,bonusPercent:plan.bonus_percent,
+    early:plan.early,active:true});
+  store.vip.grant(owner,{userId:member,tier:'silver',days:30});
+  assert.equal(store.vip.status(member).tier,'silver');
+  store.pair(member,phone);
+  const bot=store.deployment(member);
+  const backup=store.vip.backup(member,bot.id);
+  assert.ok(backup.id);
+  assert.equal(store.vip.backups(member).length,1);
+  assert.throws(()=>store.vip.restore(other,backup.id),{status:403});
+  assert.equal(store.vip.restore(member,backup.id).ok,true);
+  const reportResult=store.diagnostics.report(member,bot.id);
+  assert.equal(reportResult.workerAvailable,false);
+  assert.equal(reportResult.issue.title,'Pairing worker unavailable');
+  assert.throws(()=>store.diagnostics.report(other,bot.id),{status:404});
+  assert.throws(()=>store.diagnostics.fleet(other),{status:403});
+  const fleet=store.diagnostics.fleet(owner);
+  assert.equal(fleet.workerAvailable,false);
+  store.vip.revoke(owner,member);
+  assert.equal(store.vip.rate(member),10);
+});
