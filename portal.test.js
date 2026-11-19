@@ -1058,3 +1058,28 @@ test('VIP plan edit rights, backups, member grants and pairing diagnostics stay 
   store.vip.revoke(owner,member);
   assert.equal(store.vip.rate(member),10);
 });
+
+
+test('VIP themes enforce entitlements and support inbox prioritizes higher tiers',t=>{
+  const {store,owner,member}=fixture(t);
+  const other=store.register({email:'vip-ordinary@example.com',name:'Ordinary',digest:'test'}).id;
+  assert.equal(store.vip.themeAllowed(member,'midnight'),false);
+  store.vip.grant(owner,{userId:member,tier:'silver',days:14});
+  assert.equal(store.vip.themeAllowed(member,'midnight'),true);
+  assert.equal(store.vip.themeAllowed(member,'gold'),false);
+  store.vip.grant(owner,{userId:member,tier:'gold',days:10});
+  assert.equal(store.vip.themeAllowed(member,'gold'),true);
+  const when=store.clock();
+  store.run('INSERT INTO v3_tickets VALUES (?,?,?,NULL,0,?,?)',
+    randomUUID(),other,'Standard ticket',when,when+1000);
+  store.run('INSERT INTO v3_tickets VALUES (?,?,?,NULL,0,?,?)',
+    randomUUID(),member,'Gold ticket',when,when);
+  const inbox=store.v3.ticketInbox(owner,true);
+  assert.equal(inbox[0].subject,'Gold ticket');
+  assert.equal(inbox[0].priorityRank,2);
+  assert.equal(inbox[1].priorityRank,0);
+  const after=store.v3.ticketInbox(owner,true,{rank:inbox[0].priorityRank,stamp:inbox[0].updated,id:inbox[0].id});
+  assert.equal(after[0].subject,'Standard ticket');
+  store.vip.revoke(owner,member);
+  assert.equal(store.vip.themeAllowed(member,'midnight'),false);
+});
