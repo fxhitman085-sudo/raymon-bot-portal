@@ -162,7 +162,7 @@ async function loadVipStaff(){
   if(can('vip.grant')){
     host.append(element('h3','Grant or extend VIP'));
     const form=element('form',undefined,'v3-form');
-    const id=v3Field(form,'User ID (from Manage User)',v3Input('text',{required:true,maxLength:36,placeholder:'Paste the account ID'}));
+    const id=v3Field(form,'User ID (from Manage User)',v3Input('text',{required:true,maxLength:36,placeholder:'Select Manage on a user first',value:selectedUser?.id||''}));
     const tier=element('select');
     for(const key of ['silver','gold','diamond'])tier.append(new Option(vipLabel(key),key));
     v3Field(form,'VIP tier',tier);
