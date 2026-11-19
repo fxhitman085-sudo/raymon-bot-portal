@@ -141,7 +141,8 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
     }
     else if(route==='tickets'){
       const stamp=Number(query('stamp')), before=query('before');
-      const items=v3.ticketInbox(id,staff,before&&Number.isSafeInteger(stamp)?{stamp,id:before}:null);
+      const rank=Number(query('rank')||0);
+      const items=v3.ticketInbox(id,staff,before&&Number.isSafeInteger(stamp)?{stamp,id:before,rank:Number.isInteger(rank)&&rank>=0&&rank<=3?rank:0}:null);
       json(res,200,{items:items.slice(0,50),more:items.length>50});
     }else if(route==='ticket'){
       const ticket=query('id')||'';
