@@ -451,3 +451,22 @@ progress::-moz-progress-bar { background:#1d4ed8; }
 @media(max-width:1000px) { .payment-layout { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:380px) { .payment-packages label { padding:9px 5px; gap:4px; } }
 .payment-packages label span { min-width:0; overflow-wrap:anywhere; }
+
+/* VIP membership and connection health panels */
+.vip-plan-list { display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:16px;margin:18px 0; }
+.vip-plan { display:flex;flex-direction:column;gap:12px;min-width:0; }
+.vip-plan .actions { margin-top:auto;align-items:stretch; }
+.vip-plan .actions .button { flex:1 1 125px; }
+.vip-badge { display:inline-block;vertical-align:middle;width:110px;max-height:88px;object-fit:contain;margin-left:8px; }
+#profile-heading .vip-badge { width:58px;max-height:38px; }
+.vip-status { display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:12px 0; }
+.vip-status p { flex:1 1 160px; }
+#vip-extras-panel { display:grid;gap:15px; }
+#vip-extras-panel[hidden] { display:none; }
+#vip-tools-results { margin-top:12px; }
+.diagnostic-panel { padding:15px 0; border-top:1px solid var(--line); }
+.diagnostic-panel summary { cursor:pointer;font-weight:700; }
+#diagnostic-report { display:grid;gap:8px;margin-top:14px; }
+#diagnostic-report ul { padding-left:22px;color:var(--muted); }
+#staff-vip .v3-record { margin-bottom:12px; }
+@media(max-width:690px){.vip-plan-list{grid-template-columns:1fr}.vip-plan .actions{flex-direction:column}}
