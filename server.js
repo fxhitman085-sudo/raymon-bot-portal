@@ -133,6 +133,8 @@ async function v3Route({store,req,res,url,user,fresh,rateLimit}){
     }
     else if(route==='packages')json(res,200,{packages:v3.packages(id,query('manage')==='1')});
     else if(route==='staff')json(res,200,v3.staff(id));
+    else if(route==='staff-search')json(res,200,{accounts:v3.staffSearch(id,query('search'))});
+    else if(route==='overview')json(res,200,v3.overview(id));
     else if(route==='rankings')json(res,200,v3.rankings(id,period,previous));
     else if(route==='referrals')json(res,200,v3.referralAdmin(id,period,previous));
     else if(route==='promos'){
