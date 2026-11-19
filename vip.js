@@ -74,7 +74,7 @@ class Vip {
     const m=this.membership(userId);
     const total=this.s.get("SELECT COUNT(*) AS count FROM deployments WHERE user_id=? AND state<>'cancelled'",userId).count;
     return {tier:m?.tier||null,expires:m?.expiry||null,autoRenew:!!m?.auto_renew,
-      duration:m?.duration||null,benefits:m?.benefits||null,branding:m?.branding||'',
+      duration:m?.duration||null,benefits:m?.benefits||null,branding:m&&tierRank(m.tier)>=2?m.branding:'',
       allowedThemes:premiumThemes.slice(0,m?.benefits.themes||0),
       activeSlots:total,slotLimit:Math.min(this.s.maxBots,8+(m?.benefits.slots||0)),
       claimed:!!this.s.get('SELECT 1 FROM vip_claims WHERE user_id=? AND local_day=?',userId,this.day()),
@@ -229,7 +229,9 @@ class Vip {
       interruptions:events.filter(e=>e.title==='Connection interrupted'||e.title==='WhatsApp connection failed').length};
   }
   members(actor){
-    this.s.v3.permit(actor,'vip.view');
+    const account=this.s.requireActive(actor);
+    if(!this.s.v3.role(account).permissions.some(p=>['vip.view','vip.plans','vip.grant'].includes(p)))
+      this.fail(403,'VIP administration access required.');
     return this.s.all(`SELECT m.user_id AS id,u.email,u.name,m.tier,m.expiry,m.auto_renew AS autoRenew
       FROM vip_memberships m JOIN users u ON u.id=m.user_id WHERE m.expiry>? ORDER BY m.expiry DESC LIMIT 200`,this.s.clock());
   }
