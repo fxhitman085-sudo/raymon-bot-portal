@@ -106,12 +106,12 @@ async function showInbox(staff,cursor=null){
   for(const ticket of items){
     const button=v3Button(ticket.subject,()=>showTicket(staff,ticket.id));
     button.classList.add('v3-inbox-row');
-    button.append(element('small',(ticket.closed?'Closed':'Open')+' · '+formatDate(ticket.updated)+(staff?' · '+ticket.requester:'')));
+    button.append(element('small',(ticket.closed?'Closed':'Open')+' · '+formatDate(ticket.updated)+(staff?' · '+ticket.requester+(ticket.priorityRank?' · '+['','Silver','Gold','Diamond'][ticket.priorityRank]+' VIP priority':''):'')));
     host.append(button);
   }
   if(more){
     const last=items.at(-1);
-    const button=v3Button('Load more tickets',()=>showInbox(staff,{stamp:last.updated,before:last.id}));
+    const button=v3Button('Load more tickets',()=>showInbox(staff,{stamp:last.updated,before:last.id,rank:last.priorityRank||0}));
     button.classList.add('v3-more');
     host.append(button);
   }
