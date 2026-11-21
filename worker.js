@@ -167,12 +167,52 @@ class Worker {
   }
 }
 
+const quotedMediaCommands=new WeakSet();
+function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType){
+  return {
+    ...command,
+    async execute(ctx,args){
+      if(args?.length||!ctx.db.get('feature.vv',true))return command.execute(ctx,args);
+      const reply=normalizeMessageContent(ctx.message?.message);
+      const field=reply?getContentType(reply):null;
+      const rawQuote=field?reply[field]?.contextInfo?.quotedMessage:null;
+      const quotes=[ctx.quoted?.message,ctx.quotedMessage,rawQuote];
+      let previewOnly=false;
+      for(const quote of quotes){
+        if(!quote)continue;
+        const content=normalizeMessageContent(quote);
+        const field=content?getContentType(content):null;
+        if(!['imageMessage','videoMessage','audioMessage'].includes(field))continue;
+        const media=content[field];
+        if(media?.mediaKey?.length&&(media.directPath||media.url)){
+          const quotedMessage=field==='audioMessage'&&!media.ptt&&!media.viewOnce
+            ?quote:{[field]:media};
+          return command.execute({...ctx,quoted:{...ctx.quoted,message:quotedMessage},quotedMessage},args);
+        }
+        previewOnly=true;
+      }
+      if(previewOnly)return {
+        ok:false,
+        message:'WhatsApp included a preview in your reply, but the media file is unavailable to the bot. Ask the sender to resend it as regular media, then reply with .vv.'
+      };
+      return command.execute(ctx,args);
+    }
+  };
+}
+
 async function createRuntimeBot({dir,authDir,phone,id}){
   const config=require('./bot-runtime/config');
   const {RaymonBot}=require('./bot-runtime/lib/bot');
   const {Database}=require('./bot-runtime/lib/database');
   const {UpdateAlerts}=require('./bot-runtime/lib/updates');
   const {commandMap}=require('./bot-runtime/lib/commands');
+  const vv=commandMap.get('vv');
+  if(vv&&!quotedMediaCommands.has(vv)){
+    const {normalizeMessageContent,getContentType}=require('@whiskeysockets/baileys');
+    const wrapped=wrapQuotedMediaCommand(vv,normalizeMessageContent,getContentType);
+    quotedMediaCommands.add(wrapped);
+    commandMap.set('vv',wrapped);
+  }
   const announce=commandMap.get('announce');
   if(announce?.mainOwnerOnly)commandMap.set('announce',{
     ...announce,
@@ -266,4 +306,3 @@ if(require.main===module){
   process.once('SIGINT',()=>void stop());
 }
 module.exports={Worker,samePhone,startWorker,createRuntimeBot};
-
