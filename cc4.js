@@ -2,8 +2,8 @@
 /* Control Center 4.0: reorganize existing live controls rather than cloning them. */
 const cc4Pages=[
   ['overview','Overview','layout-dashboard','Overview & system health','Platform performance and urgent operational status'],
-  ['users','Users','users','User Management','Search accounts, balances and moderation'],
-  ['bots','Bots','bot','Bot Operations','Connection health and pairing diagnostics'],
+  ['users','Manage Users','users','User Management','Search accounts, balances and moderation'],
+  ['bots','Manage Bots','bot','Bot Operations','Connection health and pairing diagnostics'],
   ['finance','Finance','wallet','Financial Center','Payments, packages and approved revenue'],
   ['vip','VIP','crown','VIP Management','Memberships and plan administration'],
   ['support','Support','headset','Support Center','Customer requests and priority tickets'],
@@ -82,11 +82,61 @@ function cc4Build(){
   const activity=element('div',undefined,'cc4-overview-bottom');
   activity.append(element('article','Platform health information refreshes when you open the overview.','cc4-information'));
   $('cc4-pane-overview').append(activity);
-  const directory=$('cc4-pane-users');
-  const hint=element('p','Select Manage to review an account. Sensitive actions require authorization and a reason.','cc4-page-hint');
-  directory.insertBefore(hint,$('staff-accounts'));
+  const back=element('button','Back to users','button subtle');
+  back.type='button';
+  back.addEventListener('click',()=>{
+    selectedUser=null;
+    $('admin-detail').hidden=true;
+    $('search').focus();
+  });
+  $('admin-detail').prepend(back);
+  const menu=element('button','Owner menu','button subtle cc4-menu-toggle');
+  menu.type='button';
+  nav.id='cc4-navigation';
+  menu.setAttribute('aria-controls',nav.id);
+  menu.setAttribute('aria-expanded','false');
+  menu.addEventListener('click',()=>{
+    menu.setAttribute('aria-expanded',String(menu.getAttribute('aria-expanded')!=='true'));
+  });
+  sidebar.insertBefore(menu,nav);
+  nav.addEventListener('click',event=>{
+    if(event.target.closest('button'))menu.setAttribute('aria-expanded','false');
+  });
   cc4Ready=true;
   cc4Show('overview');
+}
+function profileMenu(target){
+  const detail=$('admin-detail');
+  const menu=$('profile-menu');
+  const select=$('action');
+  const coins=value=>['grant','remove'].includes(value);
+  const options=Array.from(select.options);
+  const sections=[
+    ['coins','Coins',!$('owner-action').hidden&&options.some(o=>coins(o.value))],
+    ['account','Account',!$('owner-action').hidden&&options.some(o=>!coins(o.value))],
+    ['role','Role',!$('appoint-area').hidden],
+    ['bots','Bots',!$('staff-bots').hidden],
+    ['history','History',!$('staff-coin-history').hidden||!$('founder-account-audit').hidden]
+  ].filter(item=>item[2]);
+  const activate=key=>{
+    detail.dataset.section=key;
+    for(const button of menu.children)button.setAttribute('aria-pressed',String(button.value===key));
+    if(key==='coins'||key==='account'){
+      for(const option of options)option.hidden=coins(option.value)!==(key==='coins');
+      if(select.selectedOptions[0]?.hidden)select.value=options.find(o=>!o.hidden).value;
+      $('amount-field').hidden=!coins(select.value);
+    }
+  };
+  const prior=detail.dataset.account===target.id?detail.dataset.section:null;
+  detail.dataset.account=target.id;
+  menu.replaceChildren();
+  for(const [key,label] of sections){
+    const button=element('button',label,'profile-option');
+    button.type='button';button.value=key;
+    button.addEventListener('click',()=>activate(key));
+    menu.append(button);
+  }
+  activate(sections.some(([key])=>key===prior)?prior:sections[0]?.[0]||'');
 }
 function cc4Allowed(key,user){
   const permissions=new Set(user?.staff?.permissions||[]);

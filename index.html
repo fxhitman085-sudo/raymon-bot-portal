@@ -381,9 +381,9 @@
           <label for="announcement-body">Announcement</label><textarea id="announcement-body" required maxlength="1600" rows="4"></textarea>
           <button type="submit" class="button primary">Publish</button>
         </form></details>
-        <div id="staff-accounts" class="table-scroll"><table><thead><tr><th>User</th><th id="staff-coin-heading">Coins</th><th>Account status</th><th>Manage</th></tr></thead><tbody id="users"></tbody></table></div>
+        <div id="staff-accounts" class="table-scroll"><table><thead><tr><th>User</th><th id="staff-coin-heading">Coins</th><th>Account status</th></tr></thead><tbody id="users"></tbody></table></div>
         <div id="admin-detail" class="admin-detail" hidden>
-          <h3 id="selected-user" tabindex="-1"></h3>
+          <h3 id="selected-user" tabindex="-1"></h3><p class="muted" id="profile-summary"></p><nav id="profile-menu" aria-label="User profile actions"></nav>
           <form id="owner-action" class="owner-form">
             <div><label for="action">Action</label><select id="action"><option value="grant">Add coins</option><option value="remove">Remove coins</option><option value="pause">Pause all bots</option><option value="ban">Ban user</option><option value="unban">Unban user</option></select></div>
             <div id="amount-field"><label for="amount">Coins</label><input id="amount" type="number" min="1" max="100000" value="10" inputmode="numeric"></div>

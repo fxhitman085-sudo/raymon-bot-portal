@@ -547,3 +547,34 @@ progress::-moz-progress-bar { background:#1d4ed8; }
 :root[data-theme="light"] .cc4-link[aria-current="page"]{color:#fff}
 :root[data-theme="light"] .cc4-link[aria-current="page"] .cc4-glyph{color:#fff}
 :root[data-theme="light"] .cc4-system-status{color:#176c41;border-color:#9bc7a8}
+
+/* A continuous workspace with sections separated by rhythm and hairlines. */
+body {background:radial-gradient(ellipse at 78% 0%,color-mix(in srgb,var(--accent) 9%,var(--bg)),var(--bg) 52rem) no-repeat,var(--bg)}
+main .panel, main .cc4-metric, main .cc4-information, main .cc4-shell,
+main .cc4-pane>details.panel[open], #cc4-pane-users #admin-detail,
+#cc4-pane-users #search-form {
+  background:transparent;border:0;border-radius:0;box-shadow:none;
+}
+main .panel,main .cc4-metric {border-block-start:1px solid var(--line)}
+main .cc4-metric::after {display:none}
+main summary {list-style:none}
+main summary::-webkit-details-marker {display:none}
+.directory-name {font:inherit;font-weight:650;color:var(--text);background:transparent;border:0;padding:.65rem 0;cursor:pointer;text-align:start}
+.directory-name:hover,.directory-name:focus-visible {text-decoration:underline}
+#cc4-pane-users:has(#admin-detail:not([hidden])) :is(#search-form,#staff-accounts){display:none}
+#admin-detail>button:first-child {margin-bottom:1rem}
+#profile-summary {margin-bottom:1.5rem;overflow-wrap:anywhere}
+.cc4-menu-toggle {display:none}
+@media(max-width:690px){
+  .cc4-menu-toggle {display:block;width:100%;text-align:start}
+  .cc4-menu-toggle[aria-expanded="false"]+.cc4-nav {display:none}
+  .cc4-sidebar .cc4-nav {display:grid;grid-template-columns:1fr;gap:0}
+  .cc4-sidebar .cc4-link {width:100%;border-radius:0;min-height:44px}
+}
+#profile-menu {display:flex;flex-wrap:wrap;gap:1rem;border-bottom:1px solid var(--line);margin-bottom:1rem}
+.profile-option {font:inherit;color:var(--muted);background:none;border:0;border-bottom:2px solid transparent;padding:.75rem 0;cursor:pointer}
+.profile-option[aria-pressed=true] {color:var(--text);border-color:var(--accent)}
+#admin-detail:not([data-section="coins"]):not([data-section="account"]) #owner-action,
+#admin-detail:not([data-section="role"]) #appoint-area,
+#admin-detail:not([data-section="bots"]) #staff-bots,
+#admin-detail:not([data-section="history"]) .audit {display:none}

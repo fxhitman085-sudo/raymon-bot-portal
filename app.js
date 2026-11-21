@@ -189,7 +189,7 @@ function draw(data){
             info.append(title,element('p',maskPhone(bot.phone)));
       const detail=bot.nextRenewal?'Renews '+formatDate(bot.nextRenewal):bot.requested?'Requested '+formatDate(bot.requested):'';
       if(detail)info.append(element('p',detail));
-      const manage=element('button','Manage','button subtle');
+      const manage=element('button',user.name,'directory-name');
       manage.type='button';
       manage.setAttribute('aria-label','Manage bot '+maskPhone(bot.phone));
       manage.addEventListener('click',()=>{
@@ -467,30 +467,32 @@ $('confirm-transfer').addEventListener('click',()=>action($('confirm-transfer'),
     refresh().catch(()=>{});
   }finally{$('edit-transfer').disabled=false;}
 }));
+let ownerListVersion=0;
 async function ownerList(){
+  const version=++ownerListVersion;
   const params=new URLSearchParams({search:$('search').value});
   if(selectedUser)params.set('user',selectedUser.id);
   const data=await request('/api/owner?'+params), table=$('users');
+  if(version!==ownerListVersion)return;
   if(data.rewards)renderRewardSettings(data.rewards);
   table.replaceChildren();
   const stats=data.stats;
   $('platform-stats').textContent=stats?stats.users+' users · '+stats.deployments+' deployments · '+stats.online+' online · '+stats.charges+' maintenance charges':'';
   for(const user of data.users){
-    const row=element('tr'), identity=element('td',user.name);
-    identity.append(element('span',user.email,'small'));
-    const button=element('button','Manage','button subtle');
+    const row=element('tr'), identity=element('td');
+
+    const button=element('button',user.name,'directory-name');
     button.type='button';
     button.addEventListener('click',()=>action(button,async()=>{
       selectedUser=user;
-      $('selected-user').textContent='Manage '+user.name;
-      $('admin-detail').hidden=false;
+      $('admin-detail').hidden=true;
       await ownerList();
-      ($('owner-action').hidden?$('selected-user'):$('action')).focus();
+      if(selectedUser?.id===user.id)$('selected-user').focus();
     }));
-    const controls=element('td');controls.append(button);
+    identity.append(button,element('span',user.email,'small'));
     row.append(identity);
     if(can('coins.view'))row.append(element('td',user.coins??''));
-    row.append(element('td',user.closed_at?'Closed':user.banned?'Suspended':user.founder?'Founder':user.staff?'Administrator':'Active'),controls);
+    row.append(element('td',user.closed_at?'Closed':user.banned?'Suspended':user.founder?'Founder':user.staff?'Administrator':'Active'));
     table.append(row);
   }
   if(!data.users.length){
@@ -498,8 +500,13 @@ async function ownerList(){
     cell.colSpan=4;row.append(cell);table.append(row);
   }
   if(selectedUser){
+    selectedUser=data.users.find(user=>user.id===selectedUser.id)||selectedUser;
     const cards=$('selected-bots'),target=selectedUser;
+    $('selected-user').textContent=target.name;
+    $('profile-summary').textContent=[target.email,target.founder?'Founder':target.staff?'Administrator':'User',target.closed_at?'Closed':target.banned?'Banned':'Active',can('coins.view')?numberFormat.format(target.coins)+' coins':''].filter(Boolean).join(' · ');
+    $('admin-detail').hidden=false;
     renderAdminAccountControls(target);
+    profileMenu(target);
     cards.replaceChildren();
     for(const bot of data.deployments){
       const card=element('div',undefined,'bot-card');
@@ -630,6 +637,11 @@ $('owner-action').addEventListener('submit',event=>{
   event.preventDefault();
   action(event.submitter,async()=>{
     if(!selectedUser)return;
+    const operation=$('action').value;
+    if(['ban','grant','remove'].includes(operation)){
+      const description=operation==='ban'?'Ban '+selectedUser.name:($('action').selectedOptions[0].text+' ('+$('amount').value+') for '+selectedUser.name);
+      if(!window.confirm(description+'?'))return;
+    }
     await request('/api/owner',{userId:selectedUser.id,action:$('action').value,amount:Number($('amount').value),reason:$('reason').value.trim()});
     $('reason').value='';
     await ownerList();
