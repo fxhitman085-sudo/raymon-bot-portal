@@ -58,7 +58,6 @@ function renderAdminAccountControls(target){
 }
 async function openAdminDashboard(){
   switchView('owner');
-  if(canAccounts())await ownerList();
 }
 
 function v3Button(label,callback,style='subtle'){

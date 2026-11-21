@@ -184,7 +184,7 @@ function cc4Show(page,fetchData=true){
   $('cc4-section-title').textContent=meta[3];
   $('cc4-section-subtitle').textContent=meta[4];
   if(fetchData&&page==='overview')cc4LoadOverview().catch(e=>note(e.message,true));
-  if(fetchData&&page==='users'&&canAccounts())ownerList().catch(e=>note(e.message,true));
+  if(fetchData&&(page==='users'||(page==='marketing'&&current?.user?.isOwner))&&canAccounts())ownerList().catch(e=>note(e.message,true));
   if(fetchData&&(page==='staff'||page==='roles')&&!staffPanel?.hidden)loadStaff().catch(e=>note(e.message,true));
 }
 async function cc4LoadOverview(){
