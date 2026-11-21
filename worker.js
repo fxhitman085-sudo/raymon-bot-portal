@@ -179,7 +179,12 @@ function isWrappedViewOnce(quote){
   }
   return false;
 }
-function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType,availableQuotedMedia){
+const quotedPreviewImages={
+  imageMessage:'photo.png',
+  videoMessage:'video.png',
+  audioMessage:'voice-message.png'
+};
+function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType,availableQuotedMedia,jidNormalizedUser){
   return {
     ...command,
     async execute(ctx,args){
@@ -189,12 +194,12 @@ function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType,a
       const field=reply?getContentType(reply):null;
       const rawQuote=field?reply[field]?.contextInfo?.quotedMessage:null;
       const quotes=[ctx.quoted?.message,ctx.quotedMessage,rawQuote];
-      let previewOnly=false;
+      let previewFile;
       for(const quote of quotes){
         if(!quote)continue;
         const content=normalizeMessageContent(quote);
         const field=content?getContentType(content):null;
-        if(!['imageMessage','videoMessage','audioMessage'].includes(field))continue;
+        if(!Object.hasOwn(quotedPreviewImages,field))continue;
         const media=content[field];
         const wrappedVoice=field==='audioMessage'&&isWrappedViewOnce(quote);
         if(field==='audioMessage'&&!media?.ptt&&!media?.viewOnce&&!wrappedVoice)continue;
@@ -202,13 +207,22 @@ function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType,a
           const quotedMessage={[field]:wrappedVoice?{...media,viewOnce:true}:media};
           return command.execute({...ctx,quoted:{...ctx.quoted,message:quotedMessage},quotedMessage},args);
         }
-        previewOnly=true;
+        previewFile??=quotedPreviewImages[field];
       }
-      if(previewOnly)return {
-        ok:false,
-        message:'The quoted message has no downloadable file attached. A preview can still appear in WhatsApp.'
-      };
-      return command.execute(ctx,args);
+      if(!previewFile)return command.execute(ctx,args);
+      const target=ctx.sender?jidNormalizedUser(ctx.sender):'';
+      if(!/^\d+@(s\.whatsapp\.net|lid)$/.test(target)){
+        return {ok:false,message:'I could not identify your private WhatsApp chat.'};
+      }
+      try{
+        const image=await fs.readFile(path.join(__dirname,'vv-previews',previewFile));
+        if(!ctx.db.get('feature.vv',true))return {ok:false,message:'.vv is disabled.'};
+        await ctx.sock.sendMessage(target,{image});
+        return {ok:true,sent:true};
+      }catch{
+        ctx.logger?.warn?.({phase:'preview-send'},'Requested media preview delivery failed');
+        return {ok:false,message:'I could not send the preview to your private chat.'};
+      }
     }
   };
 }
@@ -221,9 +235,9 @@ async function createRuntimeBot({dir,authDir,phone,id}){
   const {commandMap}=require('./bot-runtime/lib/commands');
   const vv=commandMap.get('vv');
   if(vv&&!quotedMediaCommands.has(vv)){
-    const {normalizeMessageContent,getContentType}=require('@whiskeysockets/baileys');
+    const {normalizeMessageContent,getContentType,jidNormalizedUser}=require('@whiskeysockets/baileys');
     const {availableQuotedMedia}=require('./bot-runtime/commands/media').mediaHelpers;
-    const wrapped=wrapQuotedMediaCommand(vv,normalizeMessageContent,getContentType,availableQuotedMedia);
+    const wrapped=wrapQuotedMediaCommand(vv,normalizeMessageContent,getContentType,availableQuotedMedia,jidNormalizedUser);
     quotedMediaCommands.add(wrapped);
     commandMap.set('vv',wrapped);
   }
