@@ -168,11 +168,23 @@ class Worker {
 }
 
 const quotedMediaCommands=new WeakSet();
-function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType){
+function hasQuotedMediaFile(media){
+  const key=media?.mediaKey;
+  return !!((key?.length||key?.data?.length)&&(media.directPath||media.url));
+}
+function isWrappedViewOnce(quote){
+  for(let depth=0;quote&&depth<5;depth++){
+    if(quote.viewOnceMessage||quote.viewOnceMessageV2||quote.viewOnceMessageV2Extension)return true;
+    quote=(quote.ephemeralMessage||quote.documentWithCaptionMessage||quote.editedMessage)?.message;
+  }
+  return false;
+}
+function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType,availableQuotedMedia){
   return {
     ...command,
     async execute(ctx,args){
       if(args?.length||!ctx.db.get('feature.vv',true))return command.execute(ctx,args);
+      if(hasQuotedMediaFile(availableQuotedMedia(ctx)?.message))return command.execute(ctx,args);
       const reply=normalizeMessageContent(ctx.message?.message);
       const field=reply?getContentType(reply):null;
       const rawQuote=field?reply[field]?.contextInfo?.quotedMessage:null;
@@ -184,16 +196,17 @@ function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType){
         const field=content?getContentType(content):null;
         if(!['imageMessage','videoMessage','audioMessage'].includes(field))continue;
         const media=content[field];
-        if(media?.mediaKey?.length&&(media.directPath||media.url)){
-          const quotedMessage=field==='audioMessage'&&!media.ptt&&!media.viewOnce
-            ?quote:{[field]:media};
+        const wrappedVoice=field==='audioMessage'&&isWrappedViewOnce(quote);
+        if(field==='audioMessage'&&!media?.ptt&&!media?.viewOnce&&!wrappedVoice)continue;
+        if(hasQuotedMediaFile(media)){
+          const quotedMessage={[field]:wrappedVoice?{...media,viewOnce:true}:media};
           return command.execute({...ctx,quoted:{...ctx.quoted,message:quotedMessage},quotedMessage},args);
         }
         previewOnly=true;
       }
       if(previewOnly)return {
         ok:false,
-        message:'WhatsApp included a preview in your reply, but the media file is unavailable to the bot. Ask the sender to resend it as regular media, then reply with .vv.'
+        message:'The quoted message has no downloadable file attached. A preview can still appear in WhatsApp.'
       };
       return command.execute(ctx,args);
     }
@@ -209,7 +222,8 @@ async function createRuntimeBot({dir,authDir,phone,id}){
   const vv=commandMap.get('vv');
   if(vv&&!quotedMediaCommands.has(vv)){
     const {normalizeMessageContent,getContentType}=require('@whiskeysockets/baileys');
-    const wrapped=wrapQuotedMediaCommand(vv,normalizeMessageContent,getContentType);
+    const {availableQuotedMedia}=require('./bot-runtime/commands/media').mediaHelpers;
+    const wrapped=wrapQuotedMediaCommand(vv,normalizeMessageContent,getContentType,availableQuotedMedia);
     quotedMediaCommands.add(wrapped);
     commandMap.set('vv',wrapped);
   }
