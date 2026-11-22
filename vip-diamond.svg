@@ -1,1 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 105 93"><image width="105" height="93" href="data:image/webp;base64,UklGRvwEAABXRUJQVlA4IPAEAACQHACdASppAF0APyV4sVGuJySnsZhbycAkiWoAyMwYVVkh4YDey7//KkKGOgPpmD6gpqNAyw5N+4aoJrvSGl6v8MzUUM7ViWJs3AFCrBg8kwQLAtr1GWwd0Cy2p7vDdqkWM7vEogU3l5kWiGiTpw0DwXFpKxMVf4+MORXCNXYUVMhGD0bfCwaTQZddgMnrjHVS5JCqrWlk9r1zxsQx8ifiZC8+ZnoLFWs9w16ZSy0/xlTdg18e4smlYAIoG3qqti9wDdMcjJPdMe+9M/7L4pQvugioNAOqH2pGLilNeaHWJP04qvFnGaOxuSY/ZrAA/vWOMjyutqT5JfJYrYAZhFysdGDKEau0M4d0iMCV3hk1aQGU+RJJSoJMWO3B2vJipOHKTB9CVIG1FW1d5vy+EkhmF78N0pCWfQs+9JR2wJe6fQnWB6nTGemlnyDydMvcyyUHtLkrJy2stHQOWrKUxuYAvhtZraTpo8nRRfmROCo2ZsEYsJy1y5/XoxwQWjZSU1l8adiUwLBVv/Mn+HqiHho74gJo0CRkbzlKP8c5roWbn9aySZpBbULG3NpP3865exf/ipZLRrmyrEEdzfGJOj/DSrE2wlbzt3kGZ1QJDvzcUO3TqoQdyUBP5x7oay8FRlBXV0fqWdhE88zESjU7DiNGNXKuYs1kmuOPL+sypqDoZPUJ8oR3+xO13cfe3QVnFvxX0M5GlsDaraiXbxLZONetRuXOM2oiyNNWvNnT+OOkyPoXrXQDS0/XcGIshSvMCqkTkNWmV57xmCFqsU9sbzJNElK45o08CHhVwils1obon5J7t0mR7qFuui2h7Jlz2QFRRCfAqnwxFOdw0Rny4EYfejlC7dy96/pCZ6EyDziWDtlMLdalTHEjQWLDLV0zhzcnz98krNT5MjR77kTE8ynFMkSBZlUIWJ1YtCAkI0basPah7PvSO9VeCnXlW42XdFPGPl0lV0kUMS45L5V6MAZaC2A3/wLD9gyJmDmKJVi4Jy0Ya4fnm/MxpVYW1GKBF7SYgo/90w3Uj0QkzQwxzIURfkDILaMGq5ry2hMirqz8yVySVjhHnOyDvTrzB0EdIH3BG9x5mQgmao1ViYLqYkXZFisL8GXk1Og2xFdacbpasKuIj5zRWWy5kFSkG5ddk/l8gby4j2v9zua0GQDTYnSpJcC1+g5JyMQR44m8Zq/+AXljvpaOdGU7KQGz+k6vw5JLT8KZ/TpkRFpZQ3ncnO8+LXDs9Spyz+5uNzbL4PynfhHLGF9kaVXSXVsftTRDUtQbpwK5vNFOpm5TOzwMGt/jmaFdBQowgWVglyXulgk8zv10zqK++jDaL4kMQeaARLl20mz2LY6Rh5K+cdFL/6JLZfCxHb1ivEcrbp4mpbYDKoDcs2VenDlih2dqp0dOydHdUYZ3wp8feXuhZqP+ei2BrWQv4vw/X/UkfqJln0mCSySp15FF7o9W+4exPAq70SOji2H3xGeTlF2BKjaYFk+Bas2NYhQbssNlKGbl2NPwM1aEy1Q+hIvps07kBxW8SxPR+wDQSkUFbhisweE3MmPTroH/+kD1okoLCstcqX7XA6FunqC05JdzyCMD/3liS4dhDWseOvqRHxZUSLigdD7M9NS+e1MCO4uF2AMAFYbauJ3DSo0ezYsgPHkJJGQ5VmxhRVvrHupzKDfl/qT0KQAA"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="72" viewBox="0 0 240 72" role="img" aria-label="Diamond VIP badge">
+<defs>
+ <linearGradient id="chrome" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f7ffff"/><stop offset=".22" stop-color="#9aacc4"/><stop offset=".48" stop-color="#eefcff"/><stop offset=".75" stop-color="#5c7eaa"/><stop offset="1" stop-color="#fff"/></linearGradient>
+ <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#15263d"/><stop offset=".53" stop-color="#050d1b"/><stop offset="1" stop-color="#111e39"/></linearGradient>
+ <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d0faff"/><stop offset=".24" stop-color="#4fcaff"/><stop offset=".65" stop-color="#0a67ff"/><stop offset="1" stop-color="#53eaff"/></linearGradient>
+ <linearGradient id="glint" x1="0" y1="0" x2="1" y2=".4"><stop stop-color="#c9f8ff"/><stop offset=".3" stop-color="#2bdfff"/><stop offset="1" stop-color="#083b9d"/></linearGradient>
+ <linearGradient id="type" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff"/><stop offset=".42" stop-color="#e5faff"/><stop offset=".64" stop-color="#8badde"/><stop offset="1" stop-color="#f2ffff"/></linearGradient>
+ <radialGradient id="aura"><stop stop-color="#1edbff" stop-opacity=".5"/><stop offset="1" stop-color="#0c78ff" stop-opacity="0"/></radialGradient>
+ <filter id="halo" x="-50%" y="-100%" width="200%" height="300%"><feGaussianBlur stdDeviation="2"/></filter>
+</defs>
+<rect x="2" y="2" width="236" height="68" rx="17" fill="url(#chrome)"/>
+<rect x="5" y="5" width="230" height="62" rx="14" fill="url(#ink)" stroke="#04246d" stroke-width="1.5"/>
+<rect x="7" y="7" width="226" height="58" rx="12" fill="none" stroke="url(#blue)" stroke-opacity=".6" stroke-width="1"/>
+<path d="M19 8H98C72 15 41 24 9 37V23Q9 8 19 8Z" fill="#6ccaff" opacity=".17"/>
+<path d="M231 41V51Q231 63 217 63H144C188 57 208 47 231 41Z" fill="url(#glint)" opacity=".5"/>
+<ellipse cx="68" cy="36" rx="61" ry="31" fill="url(#aura)"/>
+<ellipse cx="67" cy="59" rx="43" ry="2" fill="#45e7ff" opacity=".65" filter="url(#halo)"/>
+<!-- Brilliant-cut icy gemstone, individually shaded vector facets -->
+<path d="M30 26L44 15H88L102 26L67 59Z" fill="#0d72eb" stroke="#eaffff" stroke-width="1.2" stroke-linejoin="round"/>
+<path d="M30 26L44 15L51 26Z" fill="#dbfbff"/>
+<path d="M44 15L59 15L51 26Z" fill="#5ebdff"/>
+<path d="M59 15H77L67 26L51 26Z" fill="#f5ffff"/>
+<path d="M77 15H88L83 26L67 26Z" fill="#91ddff"/>
+<path d="M88 15L102 26H83Z" fill="#bbf2ff"/>
+<path d="M30 26H51L67 59Z" fill="#94dcff"/>
+<path d="M51 26H67L67 59Z" fill="#096bec"/>
+<path d="M67 26H83L67 59Z" fill="#c8faff"/>
+<path d="M83 26H102L67 59Z" fill="#0875e9"/>
+<path d="M30 26L67 59L41 38Z" fill="#0e2fa7" opacity=".48"/>
+<path d="M102 26L67 59L91 36Z" fill="#061f91" opacity=".4"/>
+<path d="M30 26H102" stroke="#fff" stroke-width="1.1" opacity=".85"/>
+<path d="M51 26L67 59L83 26" fill="none" stroke="#efffff" stroke-width=".8" opacity=".63"/>
+<path d="M44 15H88" stroke="#fff" stroke-width="1.3" opacity=".75"/>
+<path d="M49 12L52 19 59 21 52 23 49 31 46 23 39 21 46 19Z" fill="#fff" opacity=".95"/>
+<path d="M48 8V34M36 21H62" stroke="#fff" stroke-width=".7" opacity=".6"/>
+<path d="M100 19H125" stroke="url(#blue)" stroke-width="1.5" opacity=".85"/>
+<path d="M173 19H216" stroke="url(#blue)" stroke-width="1.5" opacity=".85"/>
+<path d="M139 19L143 24 149 15 155 24 159 19 156 30H142Z" fill="url(#chrome)" stroke="#c0faff" stroke-width=".6" stroke-linejoin="round"/>
+<path d="M148 12l2-5 2 5-2 4Z" fill="#46dfff"/>
+<text x="168" y="56" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="33" letter-spacing="7" font-weight="700" fill="url(#type)">VIP</text>
+</svg>
