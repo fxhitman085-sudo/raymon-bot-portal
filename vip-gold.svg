@@ -1,1 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 104 80"><image width="104" height="80" href="data:image/webp;base64,UklGRrQCAABXRUJQVlA4IKgCAACwEACdASpoAFAAPxF2sFGsJ6SitfatEYAiCUESBNMq/xNSWZ8A+lSuUubxC25WvlKtHeDKMUUVOJhVg6ZZkYi/7PXXbksfeJ57bcd9ED68j3cZUVb0v8x1bM+utFjpZKRlYA9TQAHFb8Yb1Ct7ITEUlJxSQxXg8oSqR3Kcgv6Qix/YJRbypJmhpv0RgQp4AP7w1Pl0mt2dhYZnb+jiLqZKhzffL9fWRAYPQVfsFTsVJUCZz1uRI2s9mk4gK3xPw5jMOwDRC9mBIk68+u9jC5aroqEGdA8+o7BqP9sI+4Pl6fczDHbqcBbPEBgSwY5gTwiEAHSHngxtHELSTj0pOoIZhaYB3SPlVktexIsjc8F47Q14eoE/4xOnNOWwE/JTfeXY7zr7MBe8x7jEEwpVy/+WPHtV/hh2xSaPN2SI4hEVAq3bOr9q+rx9Y8D5WEg55/6zRuCTKXoCI+u6DHSZKB6U5vZP8Fvrgnznh4iCn47azzop1nuuYDZwRjA7ykIjgcWOK75iflJPTIrDCxIxCiZs8iYL9eEbQrE3pq8lDFuynDr63ogc43r9QBw+HktsNnw/3Ax/D6VOMxb+7MYAmo0r8LpRpbDgi1CEUpa7g1c00upxB2odoVWoUEQmPcVSAm2aIpAGJrnX7SimRKNavbgDvb6ctoc4iw1bBYdB9rhPFnLpbcPuzHu107749CxQ1pfaU+iHmkZLKhrTMAg7/9aKkE+mZk7YMeWyrvMaSczNBmHk/AJFpLTuISx9dv+1fgtCSHgsoF95OSDxSnn46lq0lAojozo6iPy5kQl4c6CjCPqpCYk8g2l8PPZBksq+FpQjwTvSKvvxh3b4fcufdT315am4QOiIMu4hwVPOuwhCpDM77O+w0GWvjgdDrhatitALKzB+Hy6AAA=="/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="72" viewBox="0 0 240 72" role="img" aria-label="Gold VIP badge">
+ <defs>
+  <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4bc"/><stop offset="0.26" stop-color="#e6ad38"/><stop offset="0.51" stop-color="#fff5ce"/><stop offset="0.78" stop-color="#99600f"/><stop offset="1" stop-color="#fff0a0"/></linearGradient>
+  <linearGradient id="face" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#17202b"/><stop offset=".46" stop-color="#080b11"/><stop offset="1" stop-color="#10141d"/></linearGradient>
+  <linearGradient id="shine" x1="0" y1="0" x2="1" y2=".6"><stop stop-color="#fff4bc" stop-opacity=".88"/><stop offset=".72" stop-color="#e6ad38" stop-opacity=".32"/><stop offset="1" stop-color="#e6ad38" stop-opacity="0"/></linearGradient>
+  <linearGradient id="type" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#fff4bc"/><stop offset="0.26" stop-color="#e6ad38"/><stop offset="0.51" stop-color="#fff5ce"/><stop offset="0.78" stop-color="#99600f"/><stop offset="1" stop-color="#fff0a0"/></linearGradient>
+ </defs>
+ <rect x="2.5" y="2.5" width="235" height="67" rx="16" fill="url(#metal)"/>
+ <rect x="5.5" y="5.5" width="229" height="61" rx="13" fill="url(#face)" stroke="#030608" stroke-width="1.4"/>
+ <path d="M20 8H112C77 15 46 29 10 43V23Q10 8 20 8Z" fill="url(#shine)" opacity=".66"/>
+ <path d="M231 40V52Q231 63 219 63H148C186 56 209 46 231 40Z" fill="url(#shine)" opacity=".65"/>
+ <path d="M11 33V19Q11 10 23 10H84" fill="none" stroke="#fff4bc" stroke-opacity=".48" stroke-width="1"/>
+ <path d="M157 62H215Q230 62 230 49" fill="none" stroke="#fff4bc" stroke-opacity=".38" stroke-width="1"/>
+ <path d="M111 18L115 23 120 15 125 23 129 18 126 29H114Z" fill="url(#metal)" stroke="#e6ad38" stroke-width=".5" stroke-linejoin="round"/>
+ <circle cx="120" cy="13.2" r="1.7" fill="#fff4bc"/>
+ <path d="M73 25H105M135 25H167" stroke="url(#metal)" stroke-width="1.1" stroke-linecap="round" opacity=".9"/>
+ <text x="122" y="56" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="34" letter-spacing="9" font-weight="700" fill="url(#type)">VIP</text>
+ <path d="M43 66H197" stroke="#fff5ce" stroke-opacity=".14"/>
+ </svg>
