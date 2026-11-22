@@ -194,6 +194,9 @@ async function createRuntimeBot({dir,authDir,phone,id}){
       }catch{return {ok:false,message:'Use 1–4 punctuation characters for the prefix.'};}
     }
   });
+  const {forwardAvailableMedia}=require('./vv');
+  const vvCmd=commandMap.get('vv');
+  commandMap.set('vv',{...(vvCmd||{name:'vv',description:'Save quoted media to your DM',usage:'.vv',category:'Tools'}),name:'vv',execute:(ctx,args)=>forwardAvailableMedia(ctx,args)});
   const db=await new Database(path.join(dir,'raymon.sqlite')).init();
   // The web deployment begins in private mode and never receives host-wide commands.
   if(!db.get('release.public-status-v1',false))db.set('release.public-status-v1',true);
