@@ -11,8 +11,7 @@
     "start": "node server.js",
     "worker": "node worker.js",
     "build": "mkdir -p bot-runtime && tar -xzf bot-runtime.tar.gz -C bot-runtime",
-    "test": "node --test portal.test.js",
-    "prestart": "if [ -d /app/data/worker ]; then for backup in /app/data/worker/*/auth-*.pre-v7; do [ -d \"$backup\" ] && [ ! -L \"$backup\" ] && [ -s \"${backup%.pre-v7}/creds.json\" ] && [ -f \"$backup/creds.json\" ] || continue; find \"$backup\" -xdev -mindepth 1 -delete || exit 1; done; df -k /app/data; fi"
+    "test": "node --test portal.test.js"
   },
   "dependencies": {
     "@google/genai": "2.32.0",
