@@ -11,7 +11,8 @@
     "start": "node server.js",
     "worker": "node worker.js",
     "build": "mkdir -p bot-runtime && tar -xzf bot-runtime.tar.gz -C bot-runtime",
-    "test": "node --test portal.test.js"
+    "test": "node --test portal.test.js",
+    "prestart": "if [ -d /app/data ]; then df -k /app/data; find /app/data -xdev -type f \\( -name .outgoing-retry.json.tmp -o -name .outgoing-retry.json \\) -mmin +15 -printf '%s\\n' -delete | awk '{bytes+=$1} END {print \"Expired retry cache bytes removed:\", bytes+0}'; df -k /app/data; du -kx --max-depth=3 /app/data | sort -rn | head -25; fi"
   },
   "dependencies": {
     "@google/genai": "2.32.0",
