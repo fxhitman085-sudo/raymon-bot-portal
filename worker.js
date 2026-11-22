@@ -167,80 +167,12 @@ class Worker {
   }
 }
 
-const quotedMediaCommands=new WeakSet();
-function hasQuotedMediaFile(media){
-  const key=media?.mediaKey;
-  return !!((key?.length||key?.data?.length)&&(media.directPath||media.url));
-}
-function isWrappedViewOnce(quote){
-  for(let depth=0;quote&&depth<5;depth++){
-    if(quote.viewOnceMessage||quote.viewOnceMessageV2||quote.viewOnceMessageV2Extension)return true;
-    quote=(quote.ephemeralMessage||quote.documentWithCaptionMessage||quote.editedMessage)?.message;
-  }
-  return false;
-}
-const quotedPreviewImages={
-  imageMessage:'photo.png',
-  videoMessage:'video.png',
-  audioMessage:'voice-message.png'
-};
-function wrapQuotedMediaCommand(command,normalizeMessageContent,getContentType,availableQuotedMedia,jidNormalizedUser){
-  return {
-    ...command,
-    async execute(ctx,args){
-      if(args?.length||!ctx.db.get('feature.vv',true))return command.execute(ctx,args);
-      if(hasQuotedMediaFile(availableQuotedMedia(ctx)?.message))return command.execute(ctx,args);
-      const reply=normalizeMessageContent(ctx.message?.message);
-      const field=reply?getContentType(reply):null;
-      const rawQuote=field?reply[field]?.contextInfo?.quotedMessage:null;
-      const quotes=[ctx.quoted?.message,ctx.quotedMessage,rawQuote];
-      let previewFile;
-      for(const quote of quotes){
-        if(!quote)continue;
-        const content=normalizeMessageContent(quote);
-        const field=content?getContentType(content):null;
-        if(!Object.hasOwn(quotedPreviewImages,field))continue;
-        const media=content[field];
-        const wrappedVoice=field==='audioMessage'&&isWrappedViewOnce(quote);
-        if(field==='audioMessage'&&!media?.ptt&&!media?.viewOnce&&!wrappedVoice)continue;
-        if(hasQuotedMediaFile(media)){
-          const quotedMessage={[field]:wrappedVoice?{...media,viewOnce:true}:media};
-          return command.execute({...ctx,quoted:{...ctx.quoted,message:quotedMessage},quotedMessage},args);
-        }
-        previewFile??=quotedPreviewImages[field];
-      }
-      if(!previewFile)return command.execute(ctx,args);
-      const target=ctx.sender?jidNormalizedUser(ctx.sender):'';
-      if(!/^\d+@(s\.whatsapp\.net|lid)$/.test(target)){
-        return {ok:false,message:'I could not identify your private WhatsApp chat.'};
-      }
-      try{
-        const image=await fs.readFile(path.join(__dirname,'vv-previews',previewFile));
-        if(!ctx.db.get('feature.vv',true))return {ok:false,message:'.vv is disabled.'};
-        await ctx.sock.sendMessage(target,{image});
-        return {ok:true,sent:true};
-      }catch{
-        ctx.logger?.warn?.({phase:'preview-send'},'Requested media preview delivery failed');
-        return {ok:false,message:'I could not send the preview to your private chat.'};
-      }
-    }
-  };
-}
-
 async function createRuntimeBot({dir,authDir,phone,id}){
   const config=require('./bot-runtime/config');
   const {RaymonBot}=require('./bot-runtime/lib/bot');
   const {Database}=require('./bot-runtime/lib/database');
   const {UpdateAlerts}=require('./bot-runtime/lib/updates');
   const {commandMap}=require('./bot-runtime/lib/commands');
-  const vv=commandMap.get('vv');
-  if(vv&&!quotedMediaCommands.has(vv)){
-    const {normalizeMessageContent,getContentType,jidNormalizedUser}=require('@whiskeysockets/baileys');
-    const {availableQuotedMedia}=require('./bot-runtime/commands/media').mediaHelpers;
-    const wrapped=wrapQuotedMediaCommand(vv,normalizeMessageContent,getContentType,availableQuotedMedia,jidNormalizedUser);
-    quotedMediaCommands.add(wrapped);
-    commandMap.set('vv',wrapped);
-  }
   const announce=commandMap.get('announce');
   if(announce?.mainOwnerOnly)commandMap.set('announce',{
     ...announce,
@@ -334,3 +266,4 @@ if(require.main===module){
   process.once('SIGINT',()=>void stop());
 }
 module.exports={Worker,samePhone,startWorker,createRuntimeBot};
+
