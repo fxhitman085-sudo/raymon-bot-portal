@@ -1194,3 +1194,20 @@ test('Control Center 4.0 web resources and staff endpoints use authenticated rol
   assert.equal(typeof data.staff,'number');
   assert.equal(data.revenue,undefined);
 });
+
+test('VIP compact badges use scalable vector artwork, without embedded raster images',async()=>{
+  for(const tier of ['silver','gold','diamond']){
+    const svg=await fs.readFile(path.join(__dirname,'vip-'+tier+'.svg'),'utf8');
+    assert.match(svg,/^<svg\s/);
+    assert.match(svg,/viewBox="0 0 240 72"/);
+    assert.match(svg,/<text\b[^>]*>VIP<\/text>/);
+    assert.doesNotMatch(svg,/<image\b|data:image|base64,/i);
+    assert.ok(Buffer.byteLength(svg)<9000);
+  }
+  const diamond=await fs.readFile(path.join(__dirname,'vip-diamond.svg'),'utf8');
+  assert.match(diamond,/Brilliant-cut icy gemstone/);
+  assert.match(diamond,/<path\s/);
+  const client=await fs.readFile(path.join(__dirname,'vip-ui.js'),'utf8');
+  assert.match(client,/heading\.append\(element\('h2',vipLabel\(plan\.tier\)\+' VIP'\),vipBadge\(plan\.tier\)\)/);
+  assert.match(client,/identity\.append\(element\('strong',vipLabel\(info\.tier\)\+' VIP'\),vipBadge\(info\.tier\)\)/);
+});

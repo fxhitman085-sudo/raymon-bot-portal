@@ -4,7 +4,12 @@ const vipLabel=tier=>(tier||'standard').replace(/^./,c=>c.toUpperCase());
 const vipStamp=timestamp=>timestamp?new Date(timestamp).toLocaleString():'—';
 function vipBadge(tier){
   const image=element('img');
+  if(!['silver','gold','diamond'].includes(tier))throw new Error('Unknown VIP tier');
   image.src='/vip-'+tier+'.svg';
+  image.width=102;
+  image.height=31;
+  image.loading='lazy';
+  image.decoding='async';
   image.alt=vipLabel(tier)+' VIP';
   image.className='vip-badge';
   return image;
@@ -12,9 +17,9 @@ function vipBadge(tier){
 function renderVipAccess(user){
   $('staff-vip-panel').hidden=!can('vip.view')&&!can('vip.plans')&&!can('vip.grant');
   $('staff-diagnostic-panel').hidden=!can('diagnostics.view');
-  const old=document.querySelector('#profile-heading .vip-badge');
-  if(old)old.remove();
-  if(user.vip?.tier)$('profile-heading').append(vipBadge(user.vip.tier));
+  const profile=$('profile-heading');
+  profile.querySelectorAll('.vip-badge').forEach(badge=>badge.remove());
+  if(user.vip?.tier)profile.append(vipBadge(user.vip.tier));
 }
 async function loadVip(){
   if(!current?.user)return;
@@ -24,9 +29,11 @@ async function loadVip(){
   current.user.vip=info;
   const summary=$('vip-account-status');
   summary.replaceChildren();
-  summary.append(element('p',info.tier?vipLabel(info.tier)+' VIP · Active until '+vipStamp(info.expires):
-    'Standard membership · Upgrade anytime with coins.'));
-  if(info.tier)summary.append(vipBadge(info.tier));
+  if(info.tier){
+    const identity=element('div',undefined,'vip-identity');
+    identity.append(element('strong',vipLabel(info.tier)+' VIP'),vipBadge(info.tier));
+    summary.append(identity,element('p','Active until '+vipStamp(info.expires),'small'));
+  }else summary.append(element('p','Standard membership · Upgrade anytime with coins.'));
   summary.append(element('p','Used bot slots: '+info.activeSlots+' / '+info.slotLimit,'small'));
   $('vip-claim').hidden=!info.tier||info.claimed||!info.benefits?.daily;
   $('vip-auto-renew').hidden=!info.tier;
@@ -37,7 +44,9 @@ async function loadVip(){
   const host=$('vip-plan-list');host.replaceChildren();
   for(const plan of info.plans){
     const card=element('article',undefined,'panel vip-plan');
-    card.append(vipBadge(plan.tier),element('h2',vipLabel(plan.tier)+' VIP'));
+    const heading=element('div',undefined,'vip-tier-heading');
+    heading.append(element('h2',vipLabel(plan.tier)+' VIP'),vipBadge(plan.tier));
+    card.append(heading);
     card.append(element('p','Hosting discount '+plan.discount+'% · Daily bonus '+plan.daily+' coins · Extra slots +'+plan.slots,'small'));
     const features=element('p','Priority support · '+plan.analytics_days+' days analytics · '+plan.backups+' backup snapshots · '+plan.bonus_percent+'% coin purchase bonus','small');
     card.append(features);
@@ -179,8 +188,9 @@ async function loadVipStaff(){
   if(!members.length)host.append(element('p','No active VIP members.','muted'));
   for(const member of members){
     const item=element('div',undefined,'v3-record');
-    item.append(element('strong',member.name+' · '+vipLabel(member.tier)),
-      element('p',member.email+' · User ID '+member.id,'small'),element('p','Expires '+vipStamp(member.expiry),'small'));
+    const identity=element('div',undefined,'vip-identity');
+    identity.append(element('strong',member.name+' · '+vipLabel(member.tier)+' VIP'),vipBadge(member.tier));
+    item.append(identity,element('p',member.email+' · User ID '+member.id,'small'),element('p','Expires '+vipStamp(member.expiry),'small'));
     if(can('vip.grant'))item.append(v3Button('Revoke VIP',async()=>{
       if(!window.confirm('Revoke this VIP membership immediately?'))return;
       await request('/api/vip',{action:'revoke',userId:member.id});
