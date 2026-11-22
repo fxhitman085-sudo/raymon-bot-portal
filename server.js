@@ -499,6 +499,33 @@ function portalPaths(env,cwd=process.cwd()){
   return {dir,worker,legacy,portalPersistent:!!withinMount(dir),workerPersistent:!!withinMount(worker)};
 }
 
+function clearRetiredSessions(root, database) {
+  if (!fs.existsSync(root) || !fs.existsSync(database)) return;
+  const {DatabaseSync} = require('node:sqlite');
+  const db = new DatabaseSync(database, {readOnly: true});
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let removed = 0;
+  try {
+    const rows = db.prepare('SELECT id, generation, state FROM deployments').all();
+    for (const {id, generation, state} of rows) {
+      if (!uuid.test(id) || !uuid.test(generation)) continue;
+      const dir = path.join(root, id);
+      if (!fs.lstatSync(dir, {throwIfNoEntry: false})?.isDirectory()) continue;
+      for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+        if (!entry.isDirectory() || !entry.name.startsWith('auth-')) continue;
+        const old = entry.name.slice(5).replace(/\.pre-v7$/, '');
+        if (!uuid.test(old) || (old === generation && state !== 'cancelled')) continue;
+        fs.rmSync(path.join(dir, entry.name), {recursive: true, force: true});
+        removed++;
+      }
+    }
+    const disk = fs.statfsSync(root);
+    console.log('Retired session directories removed:', removed, 'Free MiB:', Math.floor(disk.bavail * disk.bsize / 1048576));
+  } finally {
+    db.close();
+  }
+}
+
 if(require.main===module){
   const {dir,worker,legacy,portalPersistent,workerPersistent}=portalPaths(process.env);
   if(!process.env.PORTAL_DATA_DIR&&dir!==legacy&&fs.existsSync(path.join(legacy,'portal.sqlite')))
@@ -508,6 +535,10 @@ if(require.main===module){
   fs.mkdirSync(dir,{recursive:true,mode:0o700});
   process.umask(0o077);
   const port=Number(process.env.PORT||3000);
+  if (workerPersistent) {
+    try { clearRetiredSessions(worker, path.join(dir, 'portal.sqlite')); }
+    catch (error) { console.warn('Retired session cleanup failed:', error.code || error.name); }
+  }
   const store=new Store(path.join(dir,'portal.sqlite'),Date.now,Math.max(1,Math.min(30,Number(process.env.MAX_BOTS)||8)));
   const origin=process.env.PUBLIC_ORIGIN||'http://localhost:3000';
   const sendMail=createMailer(process.env.RESEND_API_KEY,process.env.PORTAL_EMAIL_FROM);
