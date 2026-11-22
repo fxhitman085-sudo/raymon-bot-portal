@@ -12,7 +12,7 @@
     "worker": "node worker.js",
     "build": "mkdir -p bot-runtime && tar -xzf bot-runtime.tar.gz -C bot-runtime",
     "test": "node --test portal.test.js",
-    "prestart": "if [ -d /app/data ]; then df -k /app/data; find /app/data -xdev -type f \\( -name .outgoing-retry.json.tmp -o -name .outgoing-retry.json \\) -mmin +15 -printf '%s\\n' -delete | awk '{bytes+=$1} END {print \"Expired retry cache bytes removed:\", bytes+0}'; df -k /app/data; du -kx --max-depth=3 /app/data | sort -rn | head -25; fi"
+    "prestart": "if [ -d /app/data/worker ]; then for backup in /app/data/worker/*/auth-*.pre-v7; do [ -d \"$backup\" ] && [ ! -L \"$backup\" ] && [ -s \"${backup%.pre-v7}/creds.json\" ] && [ -f \"$backup/creds.json\" ] || continue; find \"$backup\" -xdev -mindepth 1 -delete || exit 1; done; df -k /app/data; fi"
   },
   "dependencies": {
     "@google/genai": "2.32.0",
