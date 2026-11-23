@@ -219,7 +219,13 @@ async function createRuntimeBot({dir,authDir,phone,id}){
         'Use '+prefix+'help <command> for details.'
       ].join('\\n\\n');
       try{
-        await ctx.sock.sendMessage(jid,{image,caption});
+        if(caption.length<=950){
+          await ctx.sock.sendMessage(jid,{image,caption});
+        }else{
+          await ctx.sock.sendMessage(jid,{image,caption:'RAYMON BOT — COMMAND MENU'});
+          for(let i=0;i<caption.length;i+=3500)
+            await ctx.sock.sendMessage(jid,{text:caption.slice(i,i+3500)});
+        }
         return {ok:true,sent:true};
       }catch{
         return currentMenu.execute(ctx,args);
