@@ -284,12 +284,12 @@ async function v5LoadReleases(){
   const actions=element('div',undefined,'actions');
   const transitions=release.state==='draft'?[['Start Beta','beta']]:
     release.state==='beta'?[['Launch Globally','global'],['Pause Beta','paused']]:
-    release.state==='global'?[['Pause Release','paused']]:[['Resume Beta','beta']];
+    release.state==='global'?[['Roll Back to Previous Stable','rollback'],['Pause Release','paused']]:[['Resume Beta','beta']];
   for(const [label,state] of transitions){
    const button=element('button',label,'button '+(state==='global'?'primary':'subtle'));
    button.type='button';
    button.addEventListener('click',async()=>{
-    const confirmation=window.prompt(state==='global'?'FOUNDER GLOBAL LAUNCH — type '+release.version+' to confirm publishing to all users.':'Type '+release.version+' to confirm the release change.');
+    const confirmation=window.prompt(state==='global'?'FOUNDER GLOBAL LAUNCH — type '+release.version+' to confirm publishing to all users.':state==='rollback'?'FOUNDER ROLLBACK — type '+release.version+' to restore the previous stable version.':'Type '+release.version+' to confirm the release change.');
     if(confirmation===null)return;
     try{
      await request('/api/v5/releases',{action:'transition',releaseId:release.id,state,confirmation});
