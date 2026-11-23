@@ -120,7 +120,9 @@ class UpgradeV5 {
   const user=this.s.requireActive(actor),role=this.s.v3.role(user);
   const allowed=user.is_owner||(!role.suspended&&role.level>=1&&role.permissions.includes('users.moderate'));
   if(!allowed)this.fail(403,'Community moderation permission required.');
-  if(action==='delete'||action==='pin'||action==='unpin'){
+  if(action==='dismiss'){
+   this.s.run('DELETE FROM v5_chat_reports WHERE message_id=?',messageId);
+  }else if(action==='delete'||action==='pin'||action==='unpin'){
    const row=this.s.get('SELECT id FROM v5_chat_messages WHERE id=?',messageId);
    if(!row)this.fail(404,'Message not found.');
    if(action==='delete')this.s.run("UPDATE v5_chat_messages SET message='',deleted=1,pinned=0 WHERE id=?",messageId);
@@ -161,7 +163,7 @@ class UpgradeV5 {
  }
  reports(actor){
   this.s.v3.permit(actor,'users.moderate');
-  return this.s.all(`SELECT r.message_id AS messageId,r.reason,r.created,
+  return this.s.all(`SELECT r.message_id AS messageId,r.reason,r.created,m.message,m.deleted,
     m.user_id AS userId,u.name,COUNT(*) OVER(PARTITION BY r.message_id) AS reports
     FROM v5_chat_reports r JOIN v5_chat_messages m ON m.id=r.message_id
     JOIN users u ON u.id=m.user_id ORDER BY r.created DESC LIMIT 60`);
