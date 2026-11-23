@@ -139,6 +139,11 @@ $('diagnose-bot').addEventListener('click',()=>action($('diagnose-bot'),async()=
   $('diagnose-support').hidden=false;
 }));
 $('diagnose-support').addEventListener('click',()=>{const support=$('support-button');if(support)support.click();});
+function vipGrantDuration(form){
+  const field=(label,max,value)=>v3Field(form,label,v3Input('number',{min:0,max,step:1,value}));
+  const days=field('Days',365,30),hours=field('Hours',23,0),minutes=field('Minutes',59,0);
+  return ()=>({days:Number(days.value),hours:Number(hours.value),minutes:Number(minutes.value)});
+}
 async function loadVipStaff(){
   const host=$('staff-vip');
   host.replaceChildren(element('p','Loading VIP memberships…','small'));
@@ -178,9 +183,9 @@ async function loadVipStaff(){
     const tier=element('select');
     for(const key of ['silver','gold','diamond'])tier.append(new Option(vipLabel(key),key));
     v3Field(form,'VIP tier',tier);
-    const days=v3Field(form,'Duration in days',v3Input('number',{min:1,max:365,value:30,required:true}));
+    const duration=vipGrantDuration(form);
     v3Submit(form,'Grant VIP',async()=>{
-      await request('/api/vip',{action:'grant',userId:id.value,tier:tier.value,days:Number(days.value)});
+      await request('/api/vip',{action:'grant',userId:id.value,tier:tier.value,...duration()});
       await loadVipStaff();note('VIP granted.');
     });host.append(form);
   }
