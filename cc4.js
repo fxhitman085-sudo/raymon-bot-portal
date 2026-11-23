@@ -105,21 +105,53 @@ function cc4Build(){
   cc4Ready=true;
   cc4Show('overview');
 }
+async function showProfileVip(panel,target){
+  panel.replaceChildren(element('p','Loading membership…','muted'));
+  try{
+    const {tier}=await request('/api/vip/profile?user='+encodeURIComponent(target.id));
+    if(!panel.isConnected)return;
+    const form=element('form',undefined,'v3-form');
+    form.append(element('p','Current membership · '+(tier?vipLabel(tier)+' VIP':'Standard')));
+    const choice=element('select');
+    for(const key of ['silver','gold','diamond'])choice.append(new Option(vipLabel(key),key));
+    if(tier)choice.value=tier;
+    v3Field(form,'VIP tier',choice);
+    const days=v3Field(form,'Duration in days',v3Input('number',{min:1,max:365,value:30,required:true}));
+    const save=async payload=>{
+      await request('/api/vip',{...payload,userId:target.id});
+      if(panel.isConnected)await showProfileVip(panel,target);
+      note('Membership updated for '+target.name+'.');
+    };
+    v3Submit(form,'Save VIP',()=>save({action:'grant',tier:choice.value,days:Number(days.value)}));
+    panel.replaceChildren(form);
+    if(tier)panel.append(v3Button('Remove VIP',async()=>{
+      if(window.confirm('Remove VIP from '+target.name+' immediately?'))await save({action:'revoke'});
+    }));
+  }catch(error){panel.replaceChildren(element('p',error.message,'muted'));}
+}
 function profileMenu(target){
   const detail=$('admin-detail');
   const menu=$('profile-menu');
+  $('profile-vip-controls')?.remove();
+  const vipPanel=element('section');
+  vipPanel.id='profile-vip-controls';
+  vipPanel.hidden=true;
+  menu.after(vipPanel);
   const select=$('action');
   const coins=value=>['grant','remove'].includes(value);
   const options=Array.from(select.options);
   const sections=[
     ['coins','Coins',!$('owner-action').hidden&&options.some(o=>coins(o.value))],
     ['account','Account',!$('owner-action').hidden&&options.some(o=>!coins(o.value))],
+    ['vip','Manage VIP',can('vip.grant')&&!target.closed_at&&!target.banned],
     ['role','Role',!$('appoint-area').hidden],
     ['bots','Bots',!$('staff-bots').hidden],
     ['history','History',!$('staff-coin-history').hidden||!$('founder-account-audit').hidden]
   ].filter(item=>item[2]);
   const activate=key=>{
     detail.dataset.section=key;
+    vipPanel.hidden=key!=='vip';
+    if(key==='vip')showProfileVip(vipPanel,target);
     for(const button of menu.children)button.setAttribute('aria-pressed',String(button.value===key));
     if(key==='coins'||key==='account'){
       for(const option of options)option.hidden=coins(option.value)!==(key==='coins');
