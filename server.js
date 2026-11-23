@@ -372,6 +372,7 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
           if(action==='transition')return json(res,200,api.transition(user.id,d.releaseId,d.state,d.confirmation));
           throw new PortalError(400,'Invalid release action.');
         }
+        if(method==='GET'&&route==='/api/v5/my-betas')return json(res,200,{betas:api.myBetas(user.id)});
         if(method==='GET'&&route==='/api/v5/feedback'){
           return json(res,200,{feedback:api.feedbackList(user.id,url.searchParams.get('releaseId'))});
         }
