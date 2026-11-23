@@ -207,7 +207,14 @@ async function createRuntimeBot({dir,authDir,phone,id}){
     const sock=bot.sock;
     if(sock?.ev&&!sock.__vvHooked){
       sock.__vvHooked=true;
-      sock.ev.on('messages.upsert',({messages})=>{for(const m of messages)remember(m);});
+      sock.ev.on('messages.upsert',({messages})=>{for(const m of messages)remember(m,bot);});
+    }
+    const h=bot.onMessages;
+    if(typeof h==='function'&&!h.__vv){
+      const wrapped=async(...a)=>{rememberMany(a,bot);return h(...a);};
+      wrapped.__vv=true;
+      if(sock)sock.__vvWrap=true;
+      bot.onMessages=wrapped;
     }
   };
   hook();
