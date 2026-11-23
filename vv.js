@@ -4,7 +4,9 @@ const W=['viewOnceMessage','viewOnceMessageV2','viewOnceMessageV2Extension',
   'documentWithCaptionMessage','editedMessage','deviceSentMessage','ephemeralMessage'];
 const MAX=16*1024*1024;
 const TTL=30*60*1000;
+const RECENT=15*60*1000;
 const CACHE=new Map();
+const LAST=new Map();
 const nj=j=>jidNormalizedUser(String(j||''));
 function code(e){const c=e?.code||e?.name;return typeof c==='string'&&/^[A-Za-z0-9_]{1,40}$/.test(c)?c:'MEDIA_ERROR';}
 function unwrap(m,d=0){while(m&&d++<8){const k=W.find(x=>m[x]?.message);if(!k)return m;m=m[k].message;}return m||null;}
@@ -17,12 +19,12 @@ function pick(m){
   }
   return null;
 }
+function usable(m){return !!m?.message?.mediaKey&&!!(m.message.directPath||m.message.url);}
 function ci(ctx){
   const c=unwrap((ctx.msg||ctx.message)?.message);
   for(const i of Object.values(c||{}))if(i?.contextInfo?.quotedMessage)return i.contextInfo;
   return null;
 }
-/* Walk nested quotes: user may reply to the bot's reply instead of the media. */
 function findQuoted(ctx){
   const info=ci(ctx);
   if(!info)return null;
@@ -35,24 +37,36 @@ function findQuoted(ctx){
   }
   return null;
 }
-/* Cache the real media the instant it lands, before the quote copy goes stale. */
 function remember(m){
   try{
     if(!m?.key?.id||!m.key.remoteJid)return;
     const media=pick(m.message);
-    if(!media||!media.viewOnce)return;
-    CACHE.set(m.key.remoteJid+'|'+m.key.id,{media,at:Date.now()});
+    if(!media||!usable(media))return;
+    const chat=m.key.remoteJid;
+    CACHE.set(chat+'|'+m.key.id,{media,at:Date.now()});
+    LAST.set(chat,{media,at:Date.now()});
     if(CACHE.size>300)for(const [k,v] of CACHE)if(Date.now()-v.at>TTL)CACHE.delete(k);
+    if(LAST.size>50)for(const [k,v] of LAST)if(Date.now()-v.at>RECENT)LAST.delete(k);
   }catch{}
+}
+function rememberMany(args){
+  for(const a of args){
+    if(Array.isArray(a)){for(const m of a)remember(m);continue;}
+    if(a&&typeof a==='object'&&a.message&&a.key)remember(a);
+  }
 }
 function resolve(ctx){
   const info=ci(ctx);
   const chat=(ctx.msg||ctx.message)?.key?.remoteJid;
   if(info?.stanzaId&&chat){
     const hit=CACHE.get(chat+'|'+info.stanzaId);
-    if(hit&&Date.now()-hit.at<TTL)return hit.media;
+    if(hit&&usable(hit.media)&&Date.now()-hit.at<TTL)return{media:hit.media,src:'id'};
   }
-  return findQuoted(ctx);
+  const last=chat?LAST.get(chat):null;
+  if(last&&usable(last.media)&&Date.now()-last.at<RECENT)return{media:last.media,src:'latest'};
+  const q=findQuoted(ctx);
+  if(q)return{media:q,src:'quote'};
+  return null;
 }
 async function targets(ctx){
   const k=(ctx.msg||ctx.message)?.key;
@@ -100,10 +114,14 @@ async function forwardAvailableMedia(ctx,args=[]){
     const on=()=>ctx.db.get('feature.vv',true);
     if(args.length)return{ok:false,message:'Reply to media with .vv.'};
     if(!on())return{ok:false,message:'.vv is disabled.'};
-    const media=resolve(ctx);
-    if(!media)return{ok:false,message:'Reply to a photo, video, document, sticker or voice note with .vv.'};
-    if(!media.message.mediaKey||!(media.message.directPath||media.message.url))
-      return{ok:false,message:'That media arrived before the bot cached it. Send it again and reply within 30 minutes.'};
+    const found=resolve(ctx);
+    if(!found)return{ok:false,message:'Reply to a photo, video, document, sticker or voice note with .vv.'};
+    const media=found.media;
+    if(!usable(media)){
+      const info=ci(ctx);
+      const chat=(ctx.msg||ctx.message)?.key?.remoteJid||'';
+      return{ok:false,message:`No media. dbg[src=${found.src} cache=${CACHE.size} last=${LAST.size} chat=${chat?'y':'n'} id=${info?.stanzaId?'y':'n'} mk=${media.message?.mediaKey?'y':'n'} path=${media.message?.directPath?'y':'n'} url=${media.message?.url?'y':'n'}]`};
+    }
     const cfg=ctx.config?.maxMediaBytes;
     const limit=Number.isSafeInteger(cfg)&&cfg>0?cfg:MAX;
     const dest=await targets(ctx);
@@ -118,7 +136,7 @@ async function forwardAvailableMedia(ctx,args=[]){
     let last;
     for(const to of dest){
       if(!on())return{ok:false,message:'.vv was disabled. Delivery cancelled.'};
-      try{await ctx.sock.sendMessage(to,body);return{ok:true,sent:true,to};}
+      try{await ctx.sock.sendMessage(to,body);return{ok:true,sent:true,to,src:found.src};}
       catch(e){last=e;ctx.logger?.warn?.({phase,code:code(e)},'Private media delivery failed');}
     }
     return{ok:false,message:`Private delivery failed (${code(last)}).`};
@@ -127,4 +145,4 @@ async function forwardAvailableMedia(ctx,args=[]){
     return{ok:false,message:`Media command failed during ${phase} (${code(e)}).`};
   }
 }
-module.exports={forwardAvailableMedia,remember};
+module.exports={forwardAvailableMedia,remember,rememberMany};
