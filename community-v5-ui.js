@@ -16,16 +16,30 @@ function v5ChatBadge(row){
   img.width=70;img.height=21;img.loading='lazy';
   group.append(img);
  }
- const clock=element('time',new Date(row.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
- clock.dateTime=new Date(row.created).toISOString();group.append(clock);
  return group;
+}
+function v5ChatTime(row){
+ const clock=element('time',new Date(row.created).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
+ clock.dateTime=new Date(row.created).toISOString();
+ return clock;
 }
 function v5RenderChat(rows){
  const host=$('v5-chat-messages');
  const currentNearBottom=host.scrollHeight-host.scrollTop-host.clientHeight<90;
+ const signature=JSON.stringify([current.user.id,rows]);
+ if(host.dataset.signature===signature)return;
+ host.dataset.signature=signature;
+ const top=host.scrollTop;
+ const anchor=[...host.querySelectorAll('article')].find(n=>n.getBoundingClientRect().bottom>host.getBoundingClientRect().top);
+ const offset=anchor?.getBoundingClientRect().top;
  host.replaceChildren();
+ let previousDay;
  for(const row of rows){
+  const day=new Date(row.created).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+  if(day!==previousDay){host.append(element('span',day,'chat-day'));previousDay=day;}
   const item=element('article',undefined,'v5-chat-entry');
+  item.dataset.id=row.id;
+  item.classList.toggle('chat-own',row.userId===current.user.id);
   item.append(v5ChatBadge(row));
   if(row.replyTo)item.append(element('div','↳ Reply to a previous message','v5-chat-reply'));
   item.append(element('p',row.deleted?'Message deleted':row.message,row.deleted?'muted':''));
@@ -79,24 +93,33 @@ function v5RenderChat(rows){
      catch(e){note(e.message,true);}
     });
    }
-   item.append(tools);
+   const actions=element('details',undefined,'chat-options');
+   const summary=element('summary','•••');summary.setAttribute('aria-label','Message actions');
+   actions.append(summary,tools);item.append(actions);
   }
-  host.append(item);
+  item.append(v5ChatTime(row));host.append(item);
  }
  if(currentNearBottom||!v5ChatInitialized)host.scrollTop=host.scrollHeight;
+ else{
+  host.scrollTop=top;
+  const replacement=[...host.querySelectorAll('article')].find(n=>n.dataset.id===anchor?.dataset.id);
+  if(replacement)host.scrollTop+=replacement.getBoundingClientRect().top-offset;
+ }
+ if(!rows.length)host.append(element('p','No messages yet.','muted'));
+ $('chat-latest').hidden=host.scrollHeight-host.scrollTop-host.clientHeight<90;
  v5ChatInitialized=true;
 }
 async function v5LoadChat(force=false){
- if(v5ChatBusy||!current?.user||workspaceView!=='community')return;
+ if(v5ChatBusy||!current?.user||workspaceView!=='chat')return;
  v5ChatBusy=true;
  try{
   const response=await request('/api/v5/chat');
-  $('v5-chat-status').textContent=response.enabled?'Live community chat · Messages update automatically':'Community chat is not currently enabled for your account.';
+  $('v5-chat-status').textContent=response.enabled?'Group chat':'Community chat is not currently enabled for your account.';
   $('v5-chat-form').hidden=!response.enabled;
   if(response.enabled){
    v5RenderChat(response.messages||[]);
-   if(!response.messages?.length)$('v5-chat-messages').append(element('p','No messages yet. Start the conversation!','muted'));
-  }else $('v5-chat-messages').replaceChildren(element('p','Community chat is unavailable or in private beta.','muted'));
+
+  }else {delete $('v5-chat-messages').dataset.signature;$('v5-chat-messages').replaceChildren(element('p','Community chat is unavailable or in private beta.','muted'));}
  }catch(error){$('v5-chat-status').textContent=error.message;}
  finally{v5ChatBusy=false;}
 }
@@ -122,7 +145,11 @@ async function v5LoadMyBetas(){
   host.append(form);
  }
 }
-$('view-community').addEventListener('click',()=>{void v5LoadChat(true);void v5LoadMyBetas().catch(()=>{});});
+$('view-community').addEventListener('click',()=>{void v5LoadMyBetas().catch(()=>{});});
+$('view-chat').addEventListener('click',()=>{switchView('chat');void v5LoadChat(true);});
+const chatList=$('v5-chat-messages');
+chatList.addEventListener('scroll',()=>{$('chat-latest').hidden=chatList.scrollHeight-chatList.scrollTop-chatList.clientHeight<90;});
+$('chat-latest').addEventListener('click',()=>{chatList.scrollTop=chatList.scrollHeight;});
 $('v5-chat-refresh').addEventListener('click',()=>void v5LoadChat(true));
 $('v5-chat-form').addEventListener('submit',event=>{
  event.preventDefault();
@@ -130,11 +157,11 @@ $('v5-chat-form').addEventListener('submit',event=>{
   const text=$('v5-chat-input').value.trim();
   if(!text)return;
   await request('/api/v5/chat',{text,replyTo:v5ChatReply});
-  $('v5-chat-input').value='';v5ChatReply=null;$('v5-chat-input').placeholder='Message the RAYMON community…';
+  $('v5-chat-input').value='';v5ChatReply=null;$('v5-chat-input').placeholder='Message';
   await v5LoadChat(true);
  });
 });
-setInterval(()=>{if(!document.hidden&&workspaceView==='community'&&current?.user)v5LoadChat().catch(()=>{});},5500);
+setInterval(()=>{if(!document.hidden&&workspaceView==='chat'&&current?.user)v5LoadChat().catch(()=>{});},5500);
 
 function v5MenuOptions(){
  const select=$('v5-menu-bot'),bots=current?.deployments||[];

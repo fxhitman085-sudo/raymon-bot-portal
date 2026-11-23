@@ -533,7 +533,7 @@ async function ownerList(){
 const workspacePages={
   home:['home-view','view-home','home-heading'],bots:['bot-view','view-bot','bots-heading'],
   deploy:['bot-view','view-deploy','manage-title'],wallet:['wallet-view','view-wallet','wallet-heading'],
-  buy:['buy-view','view-buy','buy-heading'],community:['community-view','view-community','community-heading'],
+  buy:['buy-view','view-buy','buy-heading'],chat:['chat-view','view-chat','chat-heading'],community:['community-view','view-community','community-heading'],
   profile:['profile-view','view-profile','profile-heading'],vip:['vip-view','view-vip','vip-heading'],owner:['owner-view','view-owner','owner-heading'],
   rankings:['rankings-view','view-rankings','rankings-heading'],tickets:['tickets-view','view-tickets','tickets-heading']
 };
