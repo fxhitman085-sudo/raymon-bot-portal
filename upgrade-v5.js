@@ -299,17 +299,19 @@ class UpgradeV5 {
   this.s.run(`INSERT INTO v5_menu_options VALUES (?,'sequential',?) ON CONFLICT(deployment_id)
   DO UPDATE SET revision=excluded.revision`,botId,randomUUID());
  }
- menuConfigure(id,botId,{mode,active}){
+ menuConfigure(id,botId,{mode,active,order}){
   const state=this.menu(id,botId);
   if(!state.enabled)this.fail(403,'VIP menu customization is unavailable.');
   if(!['fixed','sequential','random'].includes(mode)||state.tier!=='diamond'&&mode!=='fixed'||!Array.isArray(active)||active.length>state.limit||active.some(x=>typeof x!=='string'))
    this.fail(400,'Select a valid display mode and active images.');
   const unique=[...new Set(active)];
   if(unique.some(key=>!state.images.some(img=>img.id===key)))this.fail(400,'Unknown image.');
+  if(order!==undefined&&(!Array.isArray(order)||order.length!==state.images.length||new Set(order).size!==order.length||order.some(x=>!state.images.some(img=>img.id===x))))this.fail(400,'Choose a valid image order.');
   this.s.tx(()=>{
    this.s.run(`INSERT INTO v5_menu_options VALUES (?,?,?) ON CONFLICT(deployment_id)
      DO UPDATE SET mode=excluded.mode,revision=excluded.revision`,botId,mode,randomUUID());
    for(const image of state.images)this.s.run('UPDATE v5_menu_images SET enabled=? WHERE id=?',Number(unique.includes(image.id)),image.id);
+   if(order)order.forEach((imageId,position)=>this.s.run('UPDATE v5_menu_images SET position=? WHERE id=? AND deployment_id=?',position,imageId,botId));
   });
   return {ok:true};
  }
