@@ -107,6 +107,13 @@ class PortalV3 {
         promo_id TEXT NOT NULL REFERENCES v3_promos(id), user_id TEXT NOT NULL REFERENCES users(id),
         amount INTEGER NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(promo_id,user_id)
       );
+      CREATE TABLE IF NOT EXISTS v3_promo_vip (
+        promo_id TEXT PRIMARY KEY REFERENCES v3_promos(id), tier TEXT NOT NULL, minutes INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS v3_claim_vip (
+        promo_id TEXT NOT NULL,user_id TEXT NOT NULL,tier TEXT NOT NULL,minutes INTEGER NOT NULL,
+        PRIMARY KEY(promo_id,user_id), FOREIGN KEY(promo_id,user_id) REFERENCES v3_claims(promo_id,user_id)
+      );
       CREATE TABLE IF NOT EXISTS v3_onboarding (
         user_id TEXT PRIMARY KEY REFERENCES users(id), step INTEGER NOT NULL
       );
@@ -498,11 +505,11 @@ class PortalV3 {
   }
   promos(id,promo,before,claimBefore=null){
     this.permit(id,'promos.view');
-    const codes=this.s.all(`SELECT p.id,p.code,p.amount,p.expires,p.max_claims AS maxClaims,p.active,
+    const codes=this.s.all(`SELECT p.id,p.code,p.amount,p.expires,p.max_claims AS maxClaims,p.active,v.tier,v.minutes,
       (SELECT count(*) FROM v3_claims c WHERE c.promo_id=p.id) AS claims
-      FROM v3_promos p WHERE p.rowid < COALESCE((SELECT rowid FROM v3_promos WHERE id=?),9223372036854775807)
+      FROM v3_promos p LEFT JOIN v3_promo_vip v ON v.promo_id=p.id WHERE p.rowid < COALESCE((SELECT rowid FROM v3_promos WHERE id=?),9223372036854775807)
       ORDER BY p.rowid DESC LIMIT 51`,before||'');
-    const history=promo?this.s.all(`SELECT u.name,u.email,c.amount,c.created,c.rowid AS cursor FROM v3_claims c
+    const history=promo?this.s.all(`SELECT u.name,u.email,c.amount,c.created,c.rowid AS cursor,v.tier,v.minutes FROM v3_claims c LEFT JOIN v3_claim_vip v ON v.promo_id=c.promo_id AND v.user_id=c.user_id
       JOIN users u ON c.user_id=u.id WHERE c.promo_id=? AND c.rowid<COALESCE(?,9223372036854775807)
       ORDER BY c.rowid DESC LIMIT 101`,promo,claimBefore):[];
     return {codes,history};
@@ -512,22 +519,30 @@ class PortalV3 {
     if(!/^[A-Z0-9][A-Z0-9_-]{3,31}$/.test(value))this.fail(400,'Enter a code with 4–32 letters, numbers, hyphens, or underscores.');
     return value;
   }
-  promoSave(id,{promoId,code,amount,expires,maxClaims,active}={}){
+  promoSave(id,{promoId,code,amount,expires,maxClaims,active,rewardType,tier,minutes}={}){
     return this.s.tx(()=>{
       this.permit(id,'founder');
       if(typeof active!=='boolean')this.fail(400,'Set the activation status.');
       const existing=promoId===undefined?null:this.s.get('SELECT * FROM v3_promos WHERE id=?',typeof promoId==='string'?promoId:'');
       if(promoId!==undefined&&!existing)this.fail(404,'Code not found.');
       const now=this.s.clock();
-      if(existing&&amount===undefined&&expires===undefined&&maxClaims===undefined){
+      if(existing&&rewardType===undefined&&amount===undefined&&expires===undefined&&maxClaims===undefined){
         if(active&&existing.expires<=now)this.fail(409,'Extend the expiry before activating this code.');
         this.s.run('UPDATE v3_promos SET active=? WHERE id=?',Number(active),existing.id);
         this.audit(id,'promo.activation',existing.id,active?'Activated':'Deactivated');
         return;
       }
-      if(!Number.isSafeInteger(amount)||amount<1||amount>100_000||!Number.isSafeInteger(maxClaims)||maxClaims<1||maxClaims>1_000_000||
+      const vip=rewardType==='vip';
+      if(!vip&&rewardType!==undefined&&rewardType!=='coins')this.fail(400,'Choose a reward type.');
+      if(vip){
+        if(!['silver','gold','diamond'].includes(tier)||!Number.isSafeInteger(minutes)||minutes<1||minutes>525600)
+          this.fail(400,'Choose a VIP tier and a duration between 1 minute and 365 days.');
+        amount=0;
+      }else if(!Number.isSafeInteger(amount)||amount<1||amount>100_000)this.fail(400,'Choose a valid coin amount.');
+      if(!Number.isSafeInteger(maxClaims)||maxClaims<1||maxClaims>1_000_000||
         !Number.isSafeInteger(expires)||expires<=now||expires>now+3650*DAY)
         this.fail(400,'Choose valid coins, a future expiry, and a redemption limit.');
+      const promo=existing?.id||randomUUID();
       if(existing){
         const claims=this.s.get('SELECT count(*) AS n FROM v3_claims WHERE promo_id=?',existing.id).n;
         if(maxClaims<claims)this.fail(409,'The limit cannot be below the number of claims already made.');
@@ -537,10 +552,11 @@ class PortalV3 {
       }else{
         const value=this.normalizedCode(code);
         if(this.s.get('SELECT 1 FROM v3_promos WHERE code=?',value))this.fail(409,'This code already exists.');
-        const promo=randomUUID();
         this.s.run('INSERT INTO v3_promos VALUES (?,?,?,?,?,?,?)',promo,value,amount,expires,maxClaims,Number(active),now);
-        this.audit(id,'promo.created',promo,'Created a '+amount+' coin code');
+        this.audit(id,'promo.created',promo,vip?'Created a '+tier+' VIP code':'Created a '+amount+' coin code');
       }
+      if(vip)this.s.run('INSERT OR REPLACE INTO v3_promo_vip VALUES (?,?,?)',promo,tier,minutes);
+      else this.s.run('DELETE FROM v3_promo_vip WHERE promo_id=?',promo);
     });
   }
   redeem(id,code){
@@ -555,6 +571,20 @@ class PortalV3 {
         this.fail(409,'This code has reached its redemption limit.');
       if(user.coins+promo.amount>1_000_000)this.fail(409,'This reward would exceed your balance limit.');
       this.s.run('INSERT INTO v3_claims VALUES (?,?,?,?)',promo.id,id,promo.amount,this.s.clock());
+      const reward=this.s.get('SELECT tier,minutes FROM v3_promo_vip WHERE promo_id=?',promo.id);
+      if(reward){
+        const now=this.s.clock(),current=this.s.vip.membership(id);
+        const tier=current?.tier||reward.tier,expiry=(current?.expiry||now)+reward.minutes*60000;
+        if(current)this.s.run('UPDATE vip_memberships SET expiry=? WHERE user_id=?',expiry,id);
+        else{
+          const snapshot=JSON.stringify(this.s.vip.snapshot(this.s.vip.config(tier)));
+          this.s.run(`INSERT INTO vip_memberships(user_id,tier,expiry,started,auto_renew,duration,snapshot,branding)
+            VALUES (?,?,?,?,0,'monthly',?,'') ON CONFLICT(user_id) DO UPDATE SET tier=excluded.tier,
+            expiry=excluded.expiry,started=excluded.started,auto_renew=0,duration=excluded.duration,snapshot=excluded.snapshot,branding=''`,id,tier,expiry,now,snapshot);
+        }
+        this.s.run('INSERT INTO v3_claim_vip VALUES (?,?,?,?)',promo.id,id,tier,reward.minutes);
+        return {tier,minutes:reward.minutes,expiry};
+      }
       this.s.credit(id,promo.amount,'promo','Promotional coin reward',null,'promo:'+promo.id+':'+id);
       return {amount:promo.amount};
     });
