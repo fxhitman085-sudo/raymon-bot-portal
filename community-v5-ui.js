@@ -167,6 +167,7 @@ async function v5LoadMenu(){
  const host=$('v5-menu-grid');host.replaceChildren();
  for(const img of state.images){
   const card=element('article',undefined,'v5-menu-card');
+  card.dataset.imageId=img.id;
   const image=element('img');
   image.src='/api/v5/menu-image?'+new URLSearchParams({bot,image:img.id,v:state.revision||''});
   image.alt='Uploaded menu image';image.loading='lazy';
@@ -179,7 +180,22 @@ async function v5LoadMenu(){
    try{await request('/api/v5/menu',{action:'remove',bot,image:img.id});await v5LoadMenu();}
    catch(error){note(error.message,true);}
   });
-  card.append(image,label,remove);host.append(card);
+  card.append(image,label);
+  if(state.tier==='diamond'&&state.images.length>1){
+   const order=element('div',undefined,'actions');
+   for(const [text,delta] of [['↑ Earlier',-1],['↓ Later',1]]){
+    const button=element('button',text,'button subtle');button.type='button';
+    button.addEventListener('click',()=>{
+     const items=[...host.children],index=items.indexOf(card),next=index+delta;
+     if(next<0||next>=items.length)return;
+     if(delta<0)host.insertBefore(card,items[next]);
+     else host.insertBefore(items[next],card);
+    });
+    order.append(button);
+   }
+   card.append(order);
+  }
+  card.append(remove);host.append(card);
  }
 }
 $('v5-menu-bot').addEventListener('change',()=>void v5LoadMenu().catch(error=>note(error.message,true)));
@@ -197,7 +213,8 @@ $('v5-menu-settings-form').addEventListener('submit',event=>{
  event.preventDefault();
  action(event.submitter,async()=>{
   const active=[...$('v5-menu-grid').querySelectorAll('input:checked')].map(input=>input.value);
-  await request('/api/v5/menu',{action:'configure',bot:$('v5-menu-bot').value,mode:$('v5-menu-mode').value,active});
+  const order=[...$('v5-menu-grid').children].map(card=>card.dataset.imageId);
+  await request('/api/v5/menu',{action:'configure',bot:$('v5-menu-bot').value,mode:$('v5-menu-mode').value,active,order});
   await v5LoadMenu();note('Menu gallery settings saved.');
  });
 });
