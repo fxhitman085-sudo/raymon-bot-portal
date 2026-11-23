@@ -42,6 +42,7 @@ class UpgradeV5 {
     text TEXT NOT NULL,created INTEGER NOT NULL,
     PRIMARY KEY(release_id,user_id,created)
    );
+   CREATE TABLE IF NOT EXISTS v5_gallery_limits(tier TEXT PRIMARY KEY,max_images INTEGER NOT NULL CHECK(max_images BETWEEN 1 AND 10));
    CREATE TABLE IF NOT EXISTS v5_menu_images(
     id TEXT PRIMARY KEY,deployment_id TEXT NOT NULL REFERENCES deployments(id),
     user_id TEXT NOT NULL REFERENCES users(id),jpeg BLOB NOT NULL,
@@ -53,6 +54,8 @@ class UpgradeV5 {
     mode TEXT NOT NULL DEFAULT 'sequential',revision TEXT NOT NULL
    );
   `);
+  for(const [tier,max] of [['silver',1],['gold',1],['diamond',10]])
+   s.run('INSERT OR IGNORE INTO v5_gallery_limits VALUES (?,?)',tier,max);
  }
  seed(){
   const actor=this.s.get('SELECT user_id AS id FROM owner WHERE singleton=1')||
@@ -273,6 +276,19 @@ class UpgradeV5 {
   return this.s.all(`SELECT f.text,f.created,u.name FROM v5_release_feedback f JOIN users u ON u.id=f.user_id
    WHERE f.release_id=? ORDER BY f.created DESC LIMIT 100`,releaseId);
  }
+ galleryLimits(id){
+  this.founder(id);
+  return this.s.all('SELECT tier,max_images AS maximum FROM v5_gallery_limits ORDER BY CASE tier WHEN \'silver\' THEN 1 WHEN \'gold\' THEN 2 ELSE 3 END');
+ }
+ setGalleryLimit(id,tier,maximum){
+  this.founder(id);
+  if(!tiers.includes(tier)||!Number.isInteger(maximum)||maximum<1||maximum>10||
+    tier!=='diamond'&&maximum!==1)this.fail(400,'Silver and Gold use one image. Diamond supports 1–10 images.');
+  this.s.run('UPDATE v5_gallery_limits SET max_images=? WHERE tier=?',maximum,tier);
+  this.s.v3.audit(id,'vip.gallery.limit',tier,String(maximum));
+  return {ok:true};
+ }
+ galleryLimit(tier){return this.s.get('SELECT max_images AS n FROM v5_gallery_limits WHERE tier=?',tier)?.n||1;}
  menu(id,botId){
   this.s.requireActive(id);
   const bot=this.s.deployment(id,botId);
@@ -281,7 +297,7 @@ class UpgradeV5 {
   const enabled=!!tier&&this.hasAccess(id,'vip_menu_gallery');
   const row=this.s.get('SELECT mode,revision FROM v5_menu_options WHERE deployment_id=?',bot.id);
   const items=this.s.all('SELECT id,enabled,position,created FROM v5_menu_images WHERE deployment_id=? ORDER BY position,created',bot.id);
-  return {enabled,tier,limit:tier==='diamond'?10:tier?1:0,mode:row?.mode||'sequential',revision:row?.revision||null,images:items};
+  return {enabled,tier,limit:tier?this.galleryLimit(tier):0,mode:row?.mode||'sequential',revision:row?.revision||null,images:items};
  }
  addImage(id,botId,jpeg){
   const state=this.menu(id,botId);
@@ -337,7 +353,7 @@ class UpgradeV5 {
   if(!membership||!this.hasAccess(d.user_id,'vip_menu_gallery'))return {enabled:false};
   const state=this.menu(d.user_id,botId);
   const images=this.s.all('SELECT id FROM v5_menu_images WHERE deployment_id=? AND enabled=1 ORDER BY position,created',botId)
-    .map(r=>r.id).slice(0,membership.tier==='diamond'?10:1);
+    .map(r=>r.id).slice(0,this.galleryLimit(membership.tier));
   return {enabled:!!images.length,mode:membership.tier==='diamond'?state.mode:'fixed',revision:state.revision,images};
  }
 }
