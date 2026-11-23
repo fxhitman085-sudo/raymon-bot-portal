@@ -626,7 +626,7 @@ class Store {
       .filter(d=>d.intent==='pair'?d.pair_until>now&&(d.paid_until>now||d.coins>=this.vip.rate(d.user_id)):
         d.paid_until>now||d.coins>=this.vip.rate(d.user_id));
     const used=occupied.length,accountUsed=occupied.filter(d=>d.user_id===user.id).length;
-    return {settingsDefaults:DEFAULTS,user:{name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
+    return {settingsDefaults:DEFAULTS,user:{id:user.id,name:user.name,email:user.email,coins:user.coins,isOwner:!!user.is_owner,
       username:user.username,theme:this.vip.themeAllowed(user.id,user.theme)?user.theme:'dark',created:user.created,referralCode:user.referral_code,
       avatarVersion:this.get('SELECT version FROM portal_avatars WHERE user_id=?',user.id)?.version||null,
       banned:!!user.banned,needsPassword:!this.hasPassword(user.id),staff:this.v3.role(user),
