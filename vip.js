@@ -237,19 +237,22 @@ class Vip {
     return this.s.all(`SELECT m.user_id AS id,u.email,u.name,m.tier,m.expiry,m.auto_renew AS autoRenew
       FROM vip_memberships m JOIN users u ON u.id=m.user_id WHERE m.expiry>? ORDER BY m.expiry DESC LIMIT 200`,this.s.clock());
   }
-  grant(actor,{userId,tier,days}){
+  grant(actor,{userId,tier,days=0,hours=0,minutes=0}){
     return this.s.tx(()=>{
       this.s.v3.permit(actor,'vip.grant');
-      if(!tiers.includes(tier)||!Number.isInteger(days)||days<1||days>365)this.fail(400,'Choose tier and 1–365 days.');
+      if(!tiers.includes(tier)||![days,hours,minutes].every(n=>Number.isSafeInteger(n)&&n>=0)||days>365||hours>23||minutes>59)
+        this.fail(400,'Choose a valid tier and enter whole days, hours (0–23), and minutes (0–59).');
+      const totalMinutes=(days*24+hours)*60+minutes;
+      if(totalMinutes<1||totalMinutes>365*1440)this.fail(400,'Choose a duration between 1 minute and 365 days.');
       const user=this.s.requireActive(userId),plan=this.config(tier);
       if(!plan)this.fail(404,'VIP tier unavailable.');
       const now=this.s.clock(),current=this.membership(userId);
-      const expires=Math.max(now,current?.expiry||now)+days*DAY;
+      const expires=Math.max(now,current?.expiry||now)+totalMinutes*60000;
       this.s.run(`INSERT INTO vip_memberships(user_id,tier,expiry,started,auto_renew,duration,snapshot,branding)
         VALUES (?,?,?,?,0,'monthly',?,?) ON CONFLICT(user_id) DO UPDATE SET tier=excluded.tier,expiry=excluded.expiry,
         snapshot=excluded.snapshot,auto_renew=0`,
         user.id,tier,expires,now,JSON.stringify(this.snapshot(plan)),current?.branding||'');
-      this.s.v3.audit(actor,'vip.grant',user.id,tier+' for '+days+' days');
+      this.s.v3.audit(actor,'vip.grant',user.id,tier+' for '+days+'d '+hours+'h '+minutes+'m');
       this.s.event(user.id,null,'VIP granted','Your '+tier+' membership is active.');
       return {ok:true};
     });
