@@ -194,7 +194,7 @@ async function createRuntimeBot({dir,authDir,phone,id}){
       }catch{return {ok:false,message:'Use 1–4 punctuation characters for the prefix.'};}
     }
   });
-  const {forwardAvailableMedia,remember}=require('./vv');
+  const {forwardAvailableMedia,remember,rememberMany,diag}=require('./vv');
   const vvCmd=commandMap.get('vv');
   commandMap.set('vv',{...(vvCmd||{name:'vv',description:'Save quoted media to your DM',usage:'.vv',category:'Tools'}),name:'vv',execute:(ctx,args)=>forwardAvailableMedia(ctx,args)});
   const db=await new Database(path.join(dir,'raymon.sqlite')).init();
