@@ -1211,3 +1211,10 @@ test('VIP compact badges use scalable vector artwork, without embedded raster im
   assert.match(client,/heading\.append\(element\('h2',vipLabel\(plan\.tier\)\+' VIP'\),vipBadge\(plan\.tier\)\)/);
   assert.match(client,/identity\.append\(element\('strong',vipLabel\(info\.tier\)\+' VIP'\),vipBadge\(info\.tier\)\)/);
 });
+
+test('Inspect packaged command menu contract for v5 integration',()=>{
+  const {commandMap}=require('./bot-runtime/lib/commands');
+  const command=commandMap.get('menu');
+  console.log('V5-MENU-CONTRACT',JSON.stringify({exists:!!command,keys:command?Object.keys(command):[],
+    source:command?.execute?String(command.execute).slice(0,1800):null}));
+});
