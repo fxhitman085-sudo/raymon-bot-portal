@@ -228,6 +228,23 @@ async function v5LoadReleases(){
  if(!current?.user?.isOwner)return;
  const host=$('cc4-pane-releases');
  host.replaceChildren();
+ const limitPanel=element('article',undefined,'panel');
+ limitPanel.append(element('h3','VIP Menu Gallery Limits'),element('p','Silver and Gold can keep one fixed picture. Configure how many pictures Diamond can store per bot.','small muted'));
+ const limits=await request('/api/v5/gallery-limits');
+ const diamond=limits.tiers.find(t=>t.tier==='diamond');
+ const limitForm=element('form',undefined,'v5-release-form');
+ const limitField=v5MakeField('Diamond images per bot (1–10)');
+ limitField.input.type='number';limitField.input.min='1';limitField.input.max='10';limitField.input.step='1';
+ limitField.input.value=String(diamond?.maximum||10);
+ const limitButton=element('button','Save Diamond Image Limit','button subtle');
+ limitButton.type='submit';limitForm.append(limitField.wrap,limitButton);
+ limitForm.addEventListener('submit',event=>{
+  event.preventDefault();action(limitButton,async()=>{
+   await request('/api/v5/gallery-limits',{tier:'diamond',maximum:Number(limitField.input.value)});
+   note('Diamond gallery limit saved.');
+  });
+ });
+ limitPanel.append(limitForm);host.append(limitPanel);
  const panel=element('article',undefined,'panel');
  panel.append(element('h3','Create an upcoming release'),element('p','Only features already shipped in this portal can be activated through these controls. New code still requires a successful deployment.','small muted'));
  const form=element('form',undefined,'v5-release-form');
