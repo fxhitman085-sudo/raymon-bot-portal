@@ -314,3 +314,35 @@ async function v5LoadReleases(){
  if(!response.releases.length)versions.append(element('p','No releases created yet.','muted'));
  host.append(versions);
 }
+
+async function v5LoadModeration(){
+ if(!current?.user)return;
+ const host=$('cc4-pane-chat');host.replaceChildren();
+ const panel=element('article',undefined,'panel');
+ panel.append(element('h3','Community Report Inbox'),element('p','Review reports, remove messages, mute accounts, or dismiss false reports.','small muted'));
+ const {reports}=await request('/api/v5/reports');
+ const seen=new Set();
+ for(const row of reports){
+  if(seen.has(row.messageId))continue;seen.add(row.messageId);
+  const card=element('div',undefined,'v5-release-card');
+  card.append(element('strong',row.name+' · '+row.reports+' report(s)'),
+    element('p',row.deleted?'Message already deleted':row.message,'small'),
+    element('p','Reported reason: '+row.reason,'small muted'));
+  const buttons=element('div',undefined,'actions');
+  for(const [label,actionType] of [['Remove Message','delete'],['Mute User 1 Hour','mute'],['Dismiss Reports','dismiss']]){
+   const button=element('button',label,'button subtle');button.type='button';
+   button.addEventListener('click',async()=>{
+    if(!window.confirm(label+'?'))return;
+    try{
+     await request('/api/v5/moderate',{action:actionType,messageId:row.messageId,
+       targetId:row.userId,minutes:60,reason:'Community moderation review'});
+     await v5LoadModeration();note(label+' completed.');
+    }catch(error){note(error.message,true);}
+   });
+   buttons.append(button);
+  }
+  card.append(buttons);panel.append(card);
+ }
+ if(!seen.size)panel.append(element('p','No community reports awaiting review.','muted'));
+ host.append(panel);
+}
