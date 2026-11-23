@@ -135,8 +135,14 @@ class UpgradeV5 {
   if(action==='dismiss'){
    this.s.run('DELETE FROM v5_chat_reports WHERE message_id=?',messageId);
   }else if(action==='delete'||action==='pin'||action==='unpin'){
-   const row=this.s.get('SELECT id FROM v5_chat_messages WHERE id=?',messageId);
+   const row=this.s.get('SELECT id,user_id FROM v5_chat_messages WHERE id=?',messageId);
    if(!row)this.fail(404,'Message not found.');
+   if(!user.is_owner){
+    const author=this.s.user(row.user_id);
+    const authorRole=author&&this.s.v3.role(author);
+    if(author?.is_owner||(authorRole?.level||0)>=(role.level||0)&&authorRole?.level)
+     this.fail(403,'Only the Founder or higher-ranked staff can moderate this message.');
+   }
    if(action==='delete')this.s.run("UPDATE v5_chat_messages SET message='',deleted=1,pinned=0 WHERE id=?",messageId);
    else this.s.run('UPDATE v5_chat_messages SET pinned=? WHERE id=? AND deleted=0',Number(action==='pin'),messageId);
   }else if(action==='mute'||action==='unmute'){
