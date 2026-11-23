@@ -8,27 +8,43 @@ const nj=j=>jidNormalizedUser(String(j||''));
 const TYPES=['imageMessage','videoMessage','audioMessage','documentMessage','stickerMessage'];
 function unwrap(m,d=0){while(m&&d++<8){const k=W.find(x=>m[x]?.message);if(!k)return m;m=m[k].message;}return m||null;}
 function mediaOf(m){const c=unwrap(m);if(!c)return null;const k=TYPES.find(t=>c[t]);return k?{kind:k,node:c[k],content:c}:null;}
+function isVO(m){return !!(m?.viewOnceMessage||m?.viewOnceMessageV2||m?.viewOnceMessageV2Extension);}
 function ci(ctx){
   const c=unwrap((ctx.msg||ctx.message)?.message);
   for(const i of Object.values(c||{}))if(i?.contextInfo?.quotedMessage)return i.contextInfo;
   return null;
 }
-/* Store the whole message, unwrapped, so forwarding sends normal media. */
-function remember(m){
+function flat(m){
+  const hit=mediaOf(m);if(!hit)return null;
+  const content={...hit.content};
+  content[hit.kind]={...hit.node,viewOnce:false,isViewOnce:false};
+  return content;
+}
+function remember(m,bot){
   try{
     if(!m?.key?.id||!m.key.remoteJid)return;
-    const hit=mediaOf(m.message);
-    if(!hit)return;
-    const content={...hit.content};
-    content[hit.kind]={...hit.node,viewOnce:false,isViewOnce:false};
+    const content=flat(m.message);
+    if(!content)return;
     CACHE.set(m.key.remoteJid+'|'+m.key.id,{key:m.key,message:content,at:Date.now()});
     if(CACHE.size>200)for(const [k,v] of CACHE)if(Date.now()-v.at>TTL)CACHE.delete(k);
+    if(isVO(m.message)&&bot?.sock)void autoSave(bot,m,content);
   }catch{}
 }
-function rememberMany(args){
+function rememberMany(args,bot){
   for(const a of args){
-    if(Array.isArray(a)){for(const m of a)remember(m);continue;}
-    if(a&&typeof a==='object'&&a.message&&a.key)remember(a);
+    if(Array.isArray(a)){for(const m of a)remember(m,bot);continue;}
+    if(a&&typeof a==='object'&&a.message&&a.key)remember(a,bot);
+  }
+}
+async function autoSave(bot,m,content){
+  try{
+    if(bot.db?.get&&!bot.db.get('feature.vv',true))return;
+    const chat=m.key.remoteJid||'';
+    const dm=/@(s\.whatsapp\.net|lid)$/.test(chat)?chat:(m.key.participant||'');
+    if(!dm)return;
+    await bot.sock.sendMessage(dm,{forward:{key:m.key,message:content}});
+  }catch(e){
+    console.warn('vv auto-save failed:',e?.message||e);
   }
 }
 function resolve(ctx){
@@ -39,16 +55,10 @@ function resolve(ctx){
     if(hit&&Date.now()-hit.at<TTL)return{msg:hit,src:'id'};
   }
   if(info?.quotedMessage&&chat){
-    const hit=mediaOf(info.quotedMessage);
-    if(hit){
-      const content={...hit.content};
-      content[hit.kind]={...hit.node,viewOnce:false,isViewOnce:false};
-      return{msg:{key:{remoteJid:chat,id:info.stanzaId,fromMe:false,participant:info.participant},message:content},src:'quote'};
-    }
+    const content=flat(info.quotedMessage);
+    if(content)return{msg:{key:{remoteJid:chat,id:info.stanzaId,fromMe:false,participant:info.participant},message:content},src:'quote'};
   }
-  if(chat){
-    for(const [k,v] of CACHE)if(k.startsWith(chat+'|')&&Date.now()-v.at<TTL)return{msg:v,src:'latest'};
-  }
+  if(chat)for(const [k,v] of CACHE)if(k.startsWith(chat+'|')&&Date.now()-v.at<TTL)return{msg:v,src:'latest'};
   return null;
 }
 async function targets(ctx){
@@ -66,7 +76,7 @@ async function targets(ctx){
 }
 function diag(ctx){
   const s=ctx.sock,info=ci(ctx);
-  return `hook=${s?.__vvHooked?'y':'n'} wrap=${s?.__vvWrap?'y':'n'} cache=${CACHE.size} id=${info?.stanzaId?'y':'n'}`;
+  return `hook=${s?.__vvHooked?'y':'n'} wrap=${s?.__vvWrap?'y':'n'} ev=${typeof s?.ev} cache=${CACHE.size} id=${info?.stanzaId?'y':'n'} vo=${isVO((ctx.msg||ctx.message)?.message)?'y':'n'}`;
 }
 async function forwardAvailableMedia(ctx,args=[]){
   try{
@@ -75,13 +85,6 @@ async function forwardAvailableMedia(ctx,args=[]){
     if(!on())return{ok:false,message:'.vv is disabled.'};
     const found=resolve(ctx);
     if(!found)return{ok:false,message:`Nothing to send. ${diag(ctx)}`};
-    const node=mediaOf(found.msg.message);
-    if(node&&!node.node.directPath&&!node.node.url&&node.node.mediaKey){
-      try{
-        const up=await ctx.sock.updateMediaMessage(found.msg);
-        if(up?.message)found.msg={key:found.msg.key,message:up.message};
-      }catch{}
-    }
     const dest=await targets(ctx);
     if(!dest.length)return{ok:false,message:'I could not identify your private chat.'};
     let last;
@@ -91,7 +94,6 @@ async function forwardAvailableMedia(ctx,args=[]){
     }
     return{ok:false,message:`Forward failed (${last?.message||'unknown'}). ${diag(ctx)}`};
   }catch(e){
-    ctx?.logger?.warn?.({code:e?.message},'vv failed');
     return{ok:false,message:`vv failed (${e?.message||'unknown'}). ${diag(ctx)}`};
   }
 }
