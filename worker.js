@@ -2,6 +2,8 @@ const {Community}=require('./community');
 const fs=require('node:fs/promises');
 const path=require('node:path');
 const settings=require('./bot-settings');
+const galleryByDb=new WeakMap();
+const {randomInt}=require('node:crypto');
 
 const PAIR_CODE_WAIT=75_000;
 const validId=value=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
@@ -56,6 +58,7 @@ class Worker {
         const entry=this.entries.get(task.id);
         if(entry){
           if(entry.bot?.portalUpdates&&task.settings)settings.apply(entry.bot,task.settings);
+          if(entry.menuRevision!==task.menuRevision&&!entry.menuLoading)this.loadMenu(entry,task.menuRevision??null);
           entry.task=task;
           this.community.run(entry,()=>!this.closed&&this.entries.get(task.id)===entry&&
             entry.verified&&!entry.failure&&entry.bot?.connected&&!entry.bot.socketClosed&&
@@ -106,6 +109,31 @@ class Worker {
         entry.groupResult={token:task.token,error:true};
       }finally{clearTimeout(timer);}
     })().catch(()=>{entry.groupResult={token:task.token,error:true};}).finally(()=>{entry.groupRunning=null;});
+  }
+  loadMenu(entry,revision){
+    entry.menuLoading=(async()=>{
+      if(!revision){
+        if(entry.bot?.db)galleryByDb.delete(entry.bot.db);
+        entry.menuRevision=null;return;
+      }
+      const url=new URL('/internal/menu/'+entry.task.id,this.url);
+      const response=await this.fetcher(url,{
+        method:'GET',headers:{Authorization:'Bearer '+this.token},signal:AbortSignal.timeout(9000)
+      });
+      if(!response.ok)throw Error('Menu settings unavailable');
+      const menu=await response.json();
+      if(this.entries.get(entry.task.id)!==entry||!entry.bot?.db)return;
+      if(!menu.enabled||!Array.isArray(menu.images)||!menu.images.length){
+        galleryByDb.delete(entry.bot.db);
+      }else{
+        const images=menu.images.slice(0,10).filter(b64=>typeof b64==='string'&&b64.length<=1_500_000)
+          .map(b64=>Buffer.from(b64,'base64')).filter(bytes=>bytes.length&&bytes.length<=1024*1024);
+        if(images.length)galleryByDb.set(entry.bot.db,{mode:menu.mode,images,index:0});
+        else galleryByDb.delete(entry.bot.db);
+      }
+      entry.menuRevision=revision;
+    })().catch(()=>{console.warn('Could not refresh menu gallery; previous menu remains available.');})
+      .finally(()=>{entry.menuLoading=null;});
   }
   async startEntry(task){
     const dir=path.join(this.root,task.id);
@@ -159,6 +187,7 @@ class Worker {
   async stopEntry(id,entry){
     this.entries.delete(id);
     try{await entry.bot?.stop();}catch{console.warn('Could not close a portal bot normally.');}
+    if(entry.bot?.db)galleryByDb.delete(entry.bot.db);
     try{await entry.close?.();}catch{console.warn('Could not close a portal bot database normally.');}
   }
   async stop(){
@@ -173,6 +202,30 @@ async function createRuntimeBot({dir,authDir,phone,id}){
   const {Database}=require('./bot-runtime/lib/database');
   const {UpdateAlerts}=require('./bot-runtime/lib/updates');
   const {commandMap}=require('./bot-runtime/lib/commands');
+  const currentMenu=commandMap.get('menu');
+  if(currentMenu?.execute&&!currentMenu.__portalV5Gallery){
+    commandMap.set('menu',{...currentMenu,__portalV5Gallery:true,async execute(ctx,args){
+      const gallery=ctx.db&&galleryByDb.get(ctx.db);
+      if(!gallery?.images?.length||!ctx.sock?.sendMessage)return currentMenu.execute(ctx,args);
+      const jid=(typeof ctx.chat==='string'&&ctx.chat)||(ctx.msg||ctx.message)?.key?.remoteJid;
+      if(typeof jid!=='string'||!jid)return currentMenu.execute(ctx,args);
+      const image=gallery.mode==='random'?gallery.images[randomInt(gallery.images.length)]:
+        gallery.images[gallery.mode==='fixed'?0:gallery.index++%gallery.images.length];
+      const {helpText}=require('./bot-runtime/lib/commands');
+      const prefix=ctx.prefix||ctx.config?.prefix||'.';
+      const caption=[
+        '*RAYMON BOT — COMMAND MENU*',
+        helpText('',{...ctx,prefix}),
+        'Use '+prefix+'help <command> for details.'
+      ].join('\\n\\n');
+      try{
+        await ctx.sock.sendMessage(jid,{image,caption});
+        return {ok:true,sent:true};
+      }catch{
+        return currentMenu.execute(ctx,args);
+      }
+    }});
+  }
   const announce=commandMap.get('announce');
   if(announce?.mainOwnerOnly)commandMap.set('announce',{
     ...announce,
