@@ -328,6 +328,11 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
       if(method==='GET'&&route==='/api/vip')return json(res,200,store.vip.status(user.id));
       if(method==='GET'&&route==='/api/vip/backups')return json(res,200,{backups:store.vip.backups(user.id)});
       if(method==='GET'&&route==='/api/vip/analytics')return json(res,200,store.vip.analytics(user.id,url.searchParams.get('botId')));
+      if(method==='GET'&&route==='/api/vip/profile'){
+        store.v3.permit(user.id,'vip.grant');
+        const membership=store.vip.membership(url.searchParams.get('user'));
+        return json(res,200,{tier:membership?.tier||null});
+      }
       if(method==='GET'&&route==='/api/vip/members')return json(res,200,{members:store.vip.members(user.id),plans:store.vip.plans()});
       if(method==='GET'&&route==='/api/diagnostics')return json(res,200,store.diagnostics.report(user.id,url.searchParams.get('botId')));
       if(method==='GET'&&route==='/api/owner/diagnostics')return json(res,200,store.diagnostics.fleet(user.id));
