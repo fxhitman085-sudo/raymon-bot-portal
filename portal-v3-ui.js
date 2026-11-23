@@ -223,7 +223,7 @@ $('redeem-form').addEventListener('submit',event=>{
     const result=await request(v3Path('redeem'),{code:$('redeem-code').value});
     event.target.reset();
     await refresh();
-    note(numberFormat.format(result.amount)+' coins added to your balance.');
+    note(result.tier?vipLabel(result.tier)+' VIP now expires '+lagosDateTime(result.expiry)+' (Nigeria time).':numberFormat.format(result.amount)+' coins added to your balance.');
   });
 });
 
@@ -236,17 +236,45 @@ function lagosDate(stamp){
 function lagosDateTime(stamp){
   return new Intl.DateTimeFormat('en-NG',{timeZone:'Africa/Lagos',dateStyle:'medium',timeStyle:'short'}).format(stamp);
 }
+function promoRewardLabel(reward){
+  if(!reward.tier)return reward.amount+' coins';
+  const m=reward.minutes;
+  const duration=[Math.floor(m/1440)+'d',Math.floor(m%1440/60)+'h',m%60+'m'].filter(part=>!part.startsWith('0')).join(' ');
+  return vipLabel(reward.tier)+' VIP · '+duration;
+}
 function promoForm(code=null){
   const form=element('form',undefined,'v3-form');
   const label=code?null:v3Field(form,'Code',
     v3Input('text',{required:true,minLength:4,maxLength:32,pattern:'[A-Za-z0-9][A-Za-z0-9_\\-]{3,31}',autocomplete:'off'}));
+  const type=element('select');
+  type.append(new Option('Coins','coins'),new Option('VIP membership','vip'));
+  type.value=code?.tier?'vip':'coins';
+  v3Field(form,'Reward type',type);
   const amount=v3Field(form,'Coin reward',v3Input('number',{required:true,min:1,max:100000,value:code?.amount||''}));
-  const expires=v3Field(form,'Expiry (Nigeria time)',v3Input('datetime-local',{required:true,value:code?lagosInput(code.expires):''}));
+  const vip=element('fieldset');
+  vip.append(element('legend','VIP membership reward'));
+  const tier=element('select');
+  for(const key of ['silver','gold','diamond'])tier.append(new Option(vipLabel(key),key));
+  tier.value=code?.tier||'silver';
+  v3Field(vip,'VIP tier',tier);
+  const duration=code?.minutes??720;
+  const field=(name,max,value)=>v3Field(vip,name,v3Input('number',{min:0,max,step:1,value}));
+  const days=field('Days',365,Math.floor(duration/1440));
+  const hours=field('Hours',23,Math.floor(duration%1440/60));
+  const mins=field('Minutes',59,duration%60);
+  vip.append(element('p','Active members keep their tier and receive extra time.','small'));
+  form.append(vip);
+  const toggleReward=()=>{
+    vip.disabled=vip.hidden=type.value!=='vip';
+    amount.disabled=amount.parentElement.hidden=!vip.hidden;
+  };
+  type.addEventListener('change',toggleReward);toggleReward();
+  const expires=v3Field(form,'Redeem by (Nigeria time)',v3Input('datetime-local',{required:true,value:code?lagosInput(code.expires):''}));
   const maxClaims=v3Field(form,'Redemption limit',v3Input('number',{required:true,min:1,max:1000000,value:code?.maxClaims||''}));
   const active=v3Input('checkbox',{checked:code?!!code.active:true});
   const toggle=element('label','Active','reward-toggle');toggle.prepend(active);form.append(toggle);
   v3Submit(form,code?'Save code':'Create code',async()=>{
-    await request(v3Path('promos'),{promoId:code?.id,code:label?.value,amount:Number(amount.value),
+    await request(v3Path('promos'),{promoId:code?.id,code:label?.value,rewardType:type.value,amount:Number(amount.value),tier:tier.value,minutes:Number(days.value)*1440+Number(hours.value)*60+Number(mins.value),
       expires:Date.parse(expires.value+'+01:00'),maxClaims:Number(maxClaims.value),active:active.checked});
     await loadPromos();
     note(code?'Promo code updated.':'Promo code created.');
@@ -259,7 +287,7 @@ async function showPromoHistory(code,host,cursor){
   host.querySelector('.v3-more')?.remove();
   if(!data.history.length&&!cursor)v3Text(host,'No redemptions yet.');
   for(const entry of data.history.slice(0,100)){
-    host.append(element('p',entry.name+' · '+entry.email+' · +'+entry.amount+' coins · '+lagosDateTime(entry.created),'small'));
+    host.append(element('p',entry.name+' · '+entry.email+' · +'+promoRewardLabel(entry)+' · '+lagosDateTime(entry.created),'small'));
   }
   if(data.history.length>100){
     const more=v3Button('Load more redemptions',()=>showPromoHistory(code,host,data.history[99].cursor));
@@ -279,7 +307,7 @@ async function loadPromos(before=null){
   for(const code of codes.slice(0,50)){
     const card=element('details',undefined,'v3-record');
     card.append(element('summary',code.code+' · '+(code.expires<=Date.now()?'Expired':code.active?'Active':'Inactive')));
-    card.append(element('p',code.amount+' coins · '+code.claims+' / '+code.maxClaims+' redeemed · Expires '+lagosDateTime(code.expires),'small'));
+    card.append(element('p',promoRewardLabel(code)+' · '+code.claims+' / '+code.maxClaims+' redeemed · Expires '+lagosDateTime(code.expires),'small'));
     if(founder){
       card.append(promoForm(code));
       if(code.active||code.expires>Date.now())card.append(v3Button(code.active?'Deactivate':'Activate',async()=>{
