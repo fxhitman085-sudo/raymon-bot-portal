@@ -48,6 +48,21 @@ class UpgradeV5 {
    );
   `);
  }
+ seed(){
+  const actor=this.s.get('SELECT user_id AS id FROM owner WHERE singleton=1')||
+    this.s.get('SELECT id FROM users ORDER BY created LIMIT 1');
+  if(!actor)return;
+  for(const [feature,version,title] of [
+   ['community_chat','v5.0.0-community','RAYMON Community Chat'],
+   ['vip_menu_gallery','v5.0.0-menu','VIP Menu Gallery']
+  ]){
+   if(!this.s.get('SELECT 1 FROM v5_releases WHERE feature=? LIMIT 1',feature)){
+    const now=this.s.clock();
+    this.s.run("INSERT INTO v5_releases VALUES (?,?,?,?,?,'global',?,?,?)",
+      randomUUID(),version,title,'First stable release',feature,now,now,actor.id);
+   }
+  }
+ }
  fail(status,message){throw new this.Error(status,message);}
  founder(id){const u=this.s.requireActive(id);if(!u.is_owner)this.fail(403,'Founder access required.');return u;}
  role(id){
@@ -57,7 +72,7 @@ class UpgradeV5 {
   const role=u.is_owner?'FOUNDER':level===7?'CHIEF ADMIN':level>=5?'SENIOR ADMIN':level>=1?'ADMIN':null;
   return {role,vip:this.s.vip.membership(id)?.tier||null};
  }
- release(feature){return this.s.get("SELECT * FROM v5_releases WHERE feature=? AND state IN ('beta','global') ORDER BY updated DESC LIMIT 1",feature);}
+ release(feature){this.seed();return this.s.get("SELECT * FROM v5_releases WHERE feature=? AND state IN ('beta','global') ORDER BY updated DESC LIMIT 1",feature);}
  hasAccess(id,feature){
   const r=this.release(feature);
   if(!r)return false;
@@ -151,13 +166,13 @@ class UpgradeV5 {
     JOIN users u ON u.id=m.user_id ORDER BY r.created DESC LIMIT 60`);
  }
  releases(id){
-  this.founder(id);
+  this.founder(id);this.seed();
   const items=this.s.all('SELECT * FROM v5_releases ORDER BY updated DESC LIMIT 60');
   return items.map(r=>({...r,audience:this.s.all('SELECT kind,value FROM v5_release_audience WHERE release_id=?',r.id),
    feedback:this.s.get('SELECT COUNT(*) AS n FROM v5_release_feedback WHERE release_id=?',r.id).n}));
  }
  createRelease(id,{version,title,description,feature}){
-  this.founder(id);
+  this.founder(id);this.seed();
   if(!/^v?\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/.test(version||'')||!cleanText(title,90)||!cleanText(description,1600)||!['community_chat','vip_menu_gallery'].includes(feature))
    this.fail(400,'Enter a semantic version, title, details, and a deployed feature.');
   const releaseId=randomUUID(),now=this.s.clock();
