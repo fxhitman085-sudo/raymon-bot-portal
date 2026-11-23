@@ -284,7 +284,7 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         const botId=route.slice('/internal/menu/'.length);
         if(!/^[a-f0-9-]{36}$/.test(botId))throw new PortalError(404,'Bot not found.');
         const menu=store.upgrade5.workerMenu(botId);
-        const images=menu.enabled?menu.images.map(id=>store.get('SELECT jpeg FROM v5_menu_images WHERE id=?',id)?.jpeg?.toString('base64')).filter(Boolean):[];
+        const images=menu.enabled?menu.images.map(id=>(()=>{const bytes=store.get('SELECT jpeg FROM v5_menu_images WHERE id=?',id)?.jpeg;return bytes?Buffer.from(bytes).toString('base64'):null;})()).filter(Boolean):[];
         return json(res,200,{...menu,images});
       }
       if(!route.startsWith('/api/'))throw new PortalError(404,'Page not found.');
@@ -351,7 +351,6 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         }
         if(method==='GET'&&route==='/api/v5/reports')return json(res,200,{reports:api.reports(user.id)});
         if(method==='POST'&&route==='/api/v5/chat'){
-          rateLimit(req,user.id,'v5-message');
           const d=await body(req);
           return json(res,201,api.send(user.id,d?.text,d?.replyTo||null));
         }
