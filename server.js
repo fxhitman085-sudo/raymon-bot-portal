@@ -363,6 +363,10 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
           const d=await body(req);
           return json(res,200,api.moderate(user.id,d?.action,d?.messageId,d?.targetId,d?.reason,d?.minutes));
         }
+        if(method==='GET'&&route==='/api/v5/gallery-limits')return json(res,200,{tiers:api.galleryLimits(user.id)});
+        if(method==='POST'&&route==='/api/v5/gallery-limits'){
+          const d=await body(req);return json(res,200,api.setGalleryLimit(user.id,d?.tier,d?.maximum));
+        }
         if(method==='GET'&&route==='/api/v5/releases')return json(res,200,{releases:api.releases(user.id)});
         if(method==='POST'&&route==='/api/v5/releases'){
           rateLimit(req,user.id,'v5-release');
