@@ -1211,3 +1211,98 @@ test('VIP compact badges use scalable vector artwork, without embedded raster im
   assert.match(client,/heading\.append\(element\('h2',vipLabel\(plan\.tier\)\+' VIP'\),vipBadge\(plan\.tier\)\)/);
   assert.match(client,/identity\.append\(element\('strong',vipLabel\(info\.tier\)\+' VIP'\),vipBadge\(info\.tier\)\)/);
 });
+
+
+test('V5 community verifies staff badges and active VIP tier independently',t=>{
+ const {store,owner,member}=fixture(t),v5=store.upgrade5;
+ store.vip.grant(owner,{userId:owner,tier:'diamond',days:1});
+ store.vip.grant(owner,{userId:member,tier:'gold',days:1});
+ assert.deepEqual(v5.role(owner),{role:'FOUNDER',vip:'diamond'});
+ assert.deepEqual(v5.role(member),{role:null,vip:'gold'});
+ store.v3.setStaff(owner,{userId:member,action:'level',level:7});
+ assert.deepEqual(v5.role(member),{role:'CHIEF ADMIN',vip:'gold'});
+ store.v3.setStaff(owner,{userId:member,action:'level',level:5});
+ assert.deepEqual(v5.role(member),{role:'SENIOR ADMIN',vip:'gold'});
+ store.v3.setStaff(owner,{userId:member,action:'level',level:3});
+ assert.deepEqual(v5.role(member),{role:'ADMIN',vip:'gold'});
+ const post=v5.send(member,'Hello, everyone!');
+ const chat=v5.messages(owner);
+ assert.equal(chat.enabled,true);
+ assert.equal(chat.messages.at(-1).message,'Hello, everyone!');
+ assert.equal(chat.messages.at(-1).vip,'gold');
+ assert.equal(chat.messages.at(-1).role,'ADMIN');
+ assert.throws(()=>v5.send(member,'Immediate spam'),{status:429});
+ assert.throws(()=>v5.messageAction(owner,{action:'delete',messageId:post.id}),{status:403});
+ v5.messageAction(member,{action:'edit',messageId:post.id,text:'Updated greeting'});
+ assert.equal(v5.messages(owner).messages.at(-1).message,'Updated greeting');
+});
+
+test('V5 releases enforce founder confirmation and tier-specific beta audiences',t=>{
+ const {store,owner,member}=fixture(t),v5=store.upgrade5;
+ const prior=v5.releases(owner);
+ assert.equal(prior.some(r=>r.feature==='community_chat'&&r.state==='global'),true);
+ const releaseId=v5.createRelease(owner,{version:'v5.1.0',title:'Chat Upgrade',description:'New controls',feature:'community_chat'}).id;
+ assert.throws(()=>v5.transition(member,releaseId,'global','v5.1.0'),{status:403});
+ assert.throws(()=>v5.transition(owner,releaseId,'global','v5.1.0'),{status:409});
+ v5.audience(owner,{releaseId,tiers:['gold'],users:[]});
+ assert.throws(()=>v5.transition(owner,releaseId,'beta','incorrect'),{status:400});
+ v5.transition(owner,releaseId,'beta','v5.1.0');
+ assert.equal(v5.hasAccess(member,'community_chat'),true,'Existing global chat remains live during beta');
+ assert.equal(v5.myBetas(member).some(r=>r.id===releaseId),false);
+ store.vip.grant(owner,{userId:member,tier:'gold',days:2});
+ assert.equal(v5.myBetas(member).some(r=>r.id===releaseId),true);
+ v5.feedback(member,releaseId,'This version is helpful.');
+ assert.equal(v5.feedbackList(owner,releaseId).length,1);
+ v5.transition(owner,releaseId,'global','v5.1.0');
+ assert.equal(v5.releases(owner).find(r=>r.id===releaseId).state,'global');
+ v5.transition(owner,releaseId,'rollback','v5.1.0');
+ assert.equal(v5.releases(owner).find(r=>r.id===releaseId).state,'paused');
+ assert.equal(v5.hasAccess(member,'community_chat'),true);
+});
+
+test('V5 VIP galleries isolate bot images, enforce tiers and respect expiration',t=>{
+ const {store,owner,member,advance}=fixture(t),v5=store.upgrade5;
+ const other=store.register({email:'other@example.test',name:'Other',digest:'test'}).id;
+ store.pair(member,phone);
+ const bot=store.deployment(member);
+ assert.equal(v5.menu(member,bot.id).enabled,false);
+ assert.throws(()=>v5.addImage(member,bot.id,Buffer.from('test')),{status:403});
+ store.vip.grant(owner,{userId:member,tier:'diamond',minutes:5});
+ assert.throws(()=>v5.setGalleryLimit(member,'diamond',4),{status:403});
+ v5.setGalleryLimit(owner,'diamond',4);
+ assert.equal(v5.menu(member,bot.id).limit,4);
+ const first=v5.addImage(member,bot.id,Buffer.from('img one')).id;
+ const second=v5.addImage(member,bot.id,Buffer.from('img two')).id;
+ v5.menuConfigure(member,bot.id,{mode:'random',active:[first,second],order:[second,first]});
+ assert.equal(v5.menu(member,bot.id).images[0].id,second);
+ assert.equal(v5.menu(member,bot.id).images.length,2);
+ const live=v5.workerMenu(bot.id);
+ assert.equal(live.enabled,true);
+ assert.equal(live.images.length,2);
+ assert.equal(live.mode,'random');
+ assert.throws(()=>v5.menu(other,bot.id),{status:404});
+ assert.throws(()=>v5.image(other,bot.id,first),{status:404});
+ advance(5*60_000+1);
+ assert.equal(v5.workerMenu(bot.id).enabled,false);
+ assert.equal(v5.menu(member,bot.id).images.length,2);
+});
+
+test('V5 HTTP chat and menu upload endpoints authorize sessions and preserve per-bot storage',async t=>{
+ const {store,owner,member}=fixture(t);
+ store.putSession(member,'v5-member');
+ const origin='http://localhost:3000',server=createServer({store,origin,workerToken:'w'.repeat(40)});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const url=path=>'http://127.0.0.1:'+server.address().port+path;
+ const authorized={cookie:'raymon=v5-member'};
+ const get=(p,headers={})=>fetch(url(p),{headers});
+ const post=(p,value,headers=authorized)=>fetch(url(p),{method:'POST',headers:{...headers,origin,'content-type':'application/json'},body:JSON.stringify(value)});
+ assert.equal((await get('/api/v5/chat')).status,401);
+ assert.equal((await post('/api/v5/releases',{action:'create',version:'v9.1.0',feature:'community_chat'})).status,403);
+ const sent=await post('/api/v5/chat',{text:'Hello everyone'});
+ assert.equal(sent.status,201);
+ const data=await (await get('/api/v5/chat',authorized)).json();
+ assert.equal(data.messages.at(-1).message,'Hello everyone');
+ assert.equal(data.messages.at(-1).name,'Member');
+ assert.equal((await get('/internal/menu/'+randomUUID())).status,403);
+});

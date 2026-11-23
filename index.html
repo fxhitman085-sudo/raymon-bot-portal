@@ -11,6 +11,7 @@
   <script src="/portal-v3-ui.js" defer></script>
   <script src="/vip-ui.js" defer></script>
   <script src="/cc4.js" defer></script>
+  <script src="/community-v5-ui.js" defer></script>
 </head>
 <body>
   <header class="top"><div class="shell nav">
@@ -287,12 +288,39 @@
       <section id="community-view" hidden>
         <div class="page-heading"><h1 id="community-heading" tabindex="-1">Community</h1></div>
         <div class="actions community-links"><a class="button primary" id="community-link" target="_blank" rel="noopener noreferrer" hidden>Join the community</a><a href="https://wa.me/message/264FM6MC5QN3G1" target="_blank" rel="noopener noreferrer" id="community-support" class="button subtle">Support</a></div>
+        <article class="panel v5-chat-panel">
+          <div class="dialog-head"><div><h2>RAYMON COMMUNITY CHAT</h2><p class="muted small">Talk with other portal members. Staff and active VIP badges appear beside each name.</p></div><button id="v5-chat-refresh" class="button subtle" type="button">Refresh</button></div>
+          <p id="v5-chat-status" class="small muted" role="status">Loading chat…</p>
+          <div id="v5-chat-messages" class="v5-chat-list" role="log" aria-live="polite" aria-relevant="additions"></div>
+          <form id="v5-chat-form" class="v5-chat-compose">
+            <label for="v5-chat-input">Your message</label>
+            <div class="v5-chat-input-row"><input id="v5-chat-input" maxlength="1200" autocomplete="off" placeholder="Message the RAYMON community…" required><button class="button primary" type="submit">Send</button></div>
+            <p class="small muted">Be respectful. Do not share passwords, verification codes, or private details. Report inappropriate messages.</p>
+          </form>
+        </article>
+        <article class="panel" id="v5-beta-panel" hidden>
+          <h2>My Beta Tests</h2>
+          <p class="small muted">You can send feedback on upcoming changes shared with your account or VIP membership.</p>
+          <div id="v5-my-betas" class="v5-form"></div>
+        </article>
         <article class="panel"><h2>Official announcements</h2><div id="community-feed" class="event-list"></div></article>
       </section>
       <section id="vip-view" hidden>
         <div class="page-heading"><h1 id="vip-heading" tabindex="-1">👑 VIP Membership</h1><p class="muted">Upgrade your bot hosting experience using coins from your existing wallet.</p></div>
         <article class="panel"><h2>Your VIP Membership</h2><div id="vip-account-status" class="vip-status" aria-live="polite"></div><div class="actions"><button id="vip-claim" class="button primary" type="button" hidden>Claim VIP daily bonus</button><button id="vip-auto-renew" class="button subtle" type="button" hidden>Enable auto renewal</button></div></article>
         <div id="vip-plan-list" class="vip-plan-list"></div>
+        <article class="panel" id="v5-menu-panel">
+          <div class="dialog-head"><div><h2>Custom .menu Images</h2><p class="small muted">Personalize each deployed bot's command menu with your own pictures.</p></div><span class="v5-diamond-gem" aria-hidden="true">◆</span></div>
+          <label for="v5-menu-bot">Select your bot</label><select id="v5-menu-bot"></select>
+          <p id="v5-menu-status" class="small muted"></p>
+          <form id="v5-menu-upload-form" class="v5-form"><label for="v5-menu-file">Upload an image (JPG, PNG or WebP under 3 MB)</label>
+            <input id="v5-menu-file" type="file" accept="image/jpeg,image/png,image/webp" required>
+            <button class="button primary" type="submit">Upload Menu Image</button></form>
+          <div id="v5-menu-grid" class="v5-menu-grid"></div>
+          <form id="v5-menu-settings-form" class="v5-form"><label for="v5-menu-mode">Diamond image selection</label>
+            <select id="v5-menu-mode"><option value="fixed">Fixed picture</option><option value="sequential">Sequential rotation</option><option value="random">Random image</option></select>
+            <button class="button subtle" type="submit">Save Active Images</button></form>
+        </article>
         <article class="panel" id="vip-extras-panel" hidden><h2>Premium Tools</h2>
           <form id="vip-branding-form" class="v3-form"><label for="vip-branding">Custom bot branding (Gold / Diamond)</label><input id="vip-branding" maxlength="60" placeholder="Custom bot display label"><button class="button subtle" type="submit">Save branding</button></form>
           <div class="actions"><button id="vip-view-backups" class="button subtle" type="button">Manage Settings Backups</button><button id="vip-view-analytics" class="button subtle" type="button">Detailed Bot Analytics</button></div>

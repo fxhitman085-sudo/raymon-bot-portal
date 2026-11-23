@@ -6,7 +6,9 @@ const cc4Pages=[
   ['bots','Manage Bots','bot','Bot Operations','Connection health and pairing diagnostics'],
   ['finance','Finance','wallet','Financial Center','Payments, packages and approved revenue'],
   ['vip','VIP','crown','VIP Management','Memberships and plan administration'],
+  ['releases','Beta & Releases','flask-conical','Beta Testing & Global Launch','Test upcoming features, select VIP tiers and launch globally'],
   ['support','Support','headset','Support Center','Customer requests and priority tickets'],
+  ['chat','Community Chat','messages-square','Community Moderation','Reported messages and chat moderation'],
   ['staff','Staff','shield-check','Staff Directory','Appointments and staff management'],
   ['roles','Roles','sliders-horizontal','Role Permissions','Configure access for Adm Lvl 1–7'],
   ['marketing','Marketing','megaphone','Marketing Center','Rewards, referrals and announcements'],
@@ -181,7 +183,9 @@ function cc4Allowed(key,user){
     case 'bots':return any('diagnostics.view','deployments.view','deployments.manage');
     case 'finance':return false;
     case 'vip':return any('vip.view','vip.plans','vip.grant');
+    case 'releases':return false;
     case 'support':return any('tickets.view');
+    case 'chat':return any('users.moderate');
     case 'staff':return any('staff.manage.lower');
     case 'roles':return false;
     case 'marketing':return any('promos.view','referrals.view','announcements.publish');
@@ -215,6 +219,8 @@ function cc4Show(page,fetchData=true){
   }
   $('cc4-section-title').textContent=meta[3];
   $('cc4-section-subtitle').textContent=meta[4];
+  if(fetchData&&page==='chat'&&typeof v5LoadModeration==='function')v5LoadModeration().catch(e=>note(e.message,true));
+  if(fetchData&&page==='releases'&&typeof v5LoadReleases==='function')v5LoadReleases().catch(e=>note(e.message,true));
   if(fetchData&&page==='overview')cc4LoadOverview().catch(e=>note(e.message,true));
   if(fetchData&&(page==='users'||(page==='marketing'&&current?.user?.isOwner))&&canAccounts())ownerList().catch(e=>note(e.message,true));
   if(fetchData&&(page==='staff'||page==='roles')&&!staffPanel?.hidden)loadStaff().catch(e=>note(e.message,true));
