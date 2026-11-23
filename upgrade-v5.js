@@ -334,8 +334,9 @@ class UpgradeV5 {
   const membership=this.s.vip.membership(d.user_id);
   if(!membership||!this.hasAccess(d.user_id,'vip_menu_gallery'))return {enabled:false};
   const state=this.menu(d.user_id,botId);
-  const images=this.s.all('SELECT id FROM v5_menu_images WHERE deployment_id=? AND enabled=1 ORDER BY position,created',botId).map(r=>r.id);
-  return {enabled:!!images.length,mode:state.mode,revision:state.revision,images};
+  const images=this.s.all('SELECT id FROM v5_menu_images WHERE deployment_id=? AND enabled=1 ORDER BY position,created',botId)
+    .map(r=>r.id).slice(0,membership.tier==='diamond'?10:1);
+  return {enabled:!!images.length,mode:membership.tier==='diamond'?state.mode:'fixed',revision:state.revision,images};
  }
 }
 module.exports={UpgradeV5};
