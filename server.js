@@ -12,7 +12,7 @@ const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
 
 const random=()=>randomBytes(32).toString('base64url');
-const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/cc4.js',['cc4.js','text/javascript; charset=utf-8']],['/vip-silver.svg',['vip-silver.svg','image/svg+xml']],['/vip-gold.svg',['vip-gold.svg','image/svg+xml']],['/vip-diamond.svg',['vip-diamond.svg','image/svg+xml']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
+const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/cc4.js',['cc4.js','text/javascript; charset=utf-8']],['/community-v5-ui.js',['community-v5-ui.js','text/javascript; charset=utf-8']],['/vip-silver.svg',['vip-silver.svg','image/svg+xml']],['/vip-gold.svg',['vip-gold.svg','image/svg+xml']],['/vip-diamond.svg',['vip-diamond.svg','image/svg+xml']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
 const equal=(left,right)=>typeof left==='string'&&typeof right==='string'&&Buffer.byteLength(left)===Buffer.byteLength(right)&&timingSafeEqual(Buffer.from(left),Buffer.from(right));
 const cookieValue=(req,name)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith(name+'='))?.slice(name.length+1);
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));};
@@ -103,6 +103,17 @@ async function avatarJpeg(bytes){
   }catch{throw new PortalError(400,'Choose a valid JPG, PNG, or WebP photo under 3 MB.');}
 }
 
+async function menuJpeg(bytes){
+ try{
+  const image=sharp(bytes,{limitInputPixels:12_000_000});
+  const {format,pages}=await image.metadata();
+  if(!['jpeg','png','webp'].includes(format)||pages>1)throw Error('Unsupported media');
+  const jpeg=await image.autoOrient().resize({width:1200,height:675,fit:'inside',withoutEnlargement:true})
+    .flatten({background:'#101727'}).jpeg({quality:80,mozjpeg:true}).toBuffer();
+  if(jpeg.length>1024*1024)throw Error('Too large');
+  return jpeg;
+ }catch{throw new PortalError(400,'Choose a valid JPG, PNG or WebP image under 3 MB.');}
+}
 async function ticketScreenshot(value){
   if(value===undefined)return null;
   if(typeof value!=='string'||value.length>4*1024*1024|| !/^[A-Za-z0-9+/]+={0,2}$/.test(value))
@@ -268,6 +279,14 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         if(!Array.isArray(data?.reports)||data.reports.length>store.maxBots)throw new PortalError(400,'Invalid worker reports.');
         return json(res,200,{deployments:store.sync(data.reports)});
       }
+      if(method==='GET'&&route.startsWith('/internal/menu/')){
+        if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
+        const botId=route.slice('/internal/menu/'.length);
+        if(!/^[a-f0-9-]{36}$/.test(botId))throw new PortalError(404,'Bot not found.');
+        const menu=store.upgrade5.workerMenu(botId);
+        const images=menu.enabled?menu.images.map(id=>store.get('SELECT jpeg FROM v5_menu_images WHERE id=?',id)?.jpeg?.toString('base64')).filter(Boolean):[];
+        return json(res,200,{...menu,images});
+      }
       if(!route.startsWith('/api/'))throw new PortalError(404,'Page not found.');
       const session=cookieValue(req,sessionName);
       const user=store.session(session);
@@ -325,6 +344,66 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
+      if(route.startsWith('/api/v5/')){
+        const api=store.upgrade5;
+        if(method==='GET'&&route==='/api/v5/chat'){
+          return json(res,200,api.messages(user.id,Number(url.searchParams.get('after')||0)));
+        }
+        if(method==='GET'&&route==='/api/v5/reports')return json(res,200,{reports:api.reports(user.id)});
+        if(method==='POST'&&route==='/api/v5/chat'){
+          rateLimit(req,user.id,'v5-message');
+          const d=await body(req);
+          return json(res,201,api.send(user.id,d?.text,d?.replyTo||null));
+        }
+        if(method==='POST'&&route==='/api/v5/chat-action'){
+          rateLimit(req,user.id,'v5-action');
+          return json(res,200,api.messageAction(user.id,await body(req)));
+        }
+        if(method==='POST'&&route==='/api/v5/moderate'){
+          rateLimit(req,user.id,'v5-moderate');
+          const d=await body(req);
+          return json(res,200,api.moderate(user.id,d?.action,d?.messageId,d?.targetId,d?.reason,d?.minutes));
+        }
+        if(method==='GET'&&route==='/api/v5/releases')return json(res,200,{releases:api.releases(user.id)});
+        if(method==='POST'&&route==='/api/v5/releases'){
+          rateLimit(req,user.id,'v5-release');
+          const d=await body(req),action=d?.action;
+          if(action==='create')return json(res,201,api.createRelease(user.id,d));
+          if(action==='audience')return json(res,200,api.audience(user.id,d));
+          if(action==='transition')return json(res,200,api.transition(user.id,d.releaseId,d.state,d.confirmation));
+          throw new PortalError(400,'Invalid release action.');
+        }
+        if(method==='GET'&&route==='/api/v5/feedback'){
+          return json(res,200,{feedback:api.feedbackList(user.id,url.searchParams.get('releaseId'))});
+        }
+        if(method==='POST'&&route==='/api/v5/feedback'){
+          rateLimit(req,user.id,'v5-feedback');
+          const d=await body(req);return json(res,201,api.feedback(user.id,d?.releaseId,d?.text));
+        }
+        if(method==='GET'&&route==='/api/v5/feature-access')
+          return json(res,200,{community_chat:api.hasAccess(user.id,'community_chat'),
+            vip_menu_gallery:api.hasAccess(user.id,'vip_menu_gallery')});
+        if(method==='GET'&&route==='/api/v5/menu'){
+          return json(res,200,api.menu(user.id,url.searchParams.get('bot')));
+        }
+        if(method==='GET'&&route==='/api/v5/menu-image'){
+          const jpeg=api.image(user.id,url.searchParams.get('bot'),url.searchParams.get('image'));
+          res.writeHead(200,{'Content-Type':'image/jpeg'});return res.end(jpeg);
+        }
+        if(method==='POST'&&route==='/api/v5/menu-upload'){
+          rateLimit(req,user.id,'v5-menu-upload');
+          const bot=url.searchParams.get('bot');
+          const image=await menuJpeg(await readBody(req,3*1024*1024));
+          return json(res,201,api.addImage(user.id,bot,image));
+        }
+        if(method==='POST'&&route==='/api/v5/menu'){
+          rateLimit(req,user.id,'v5-menu');
+          const d=await body(req);
+          if(d?.action==='configure')return json(res,200,api.menuConfigure(user.id,d.bot,d));
+          if(d?.action==='remove')return json(res,200,api.removeImage(user.id,d.bot,d.image));
+          throw new PortalError(400,'Unknown menu action.');
+        }
+      }
       if(method==='GET'&&route==='/api/vip')return json(res,200,store.vip.status(user.id));
       if(method==='GET'&&route==='/api/vip/backups')return json(res,200,{backups:store.vip.backups(user.id)});
       if(method==='GET'&&route==='/api/vip/analytics')return json(res,200,store.vip.analytics(user.id,url.searchParams.get('botId')));
