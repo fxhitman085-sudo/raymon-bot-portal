@@ -194,7 +194,7 @@ async function createRuntimeBot({dir,authDir,phone,id}){
       }catch{return {ok:false,message:'Use 1–4 punctuation characters for the prefix.'};}
     }
   });
-  const {forwardAvailableMedia,remember}=require('./vv');
+  const {forwardAvailableMedia,remember,rememberMany}=require('./vv');
   const vvCmd=commandMap.get('vv');
   commandMap.set('vv',{...(vvCmd||{name:'vv',description:'Save quoted media to your DM',usage:'.vv',category:'Tools'}),name:'vv',execute:(ctx,args)=>forwardAvailableMedia(ctx,args)});
   const db=await new Database(path.join(dir,'raymon.sqlite')).init();
@@ -205,9 +205,16 @@ async function createRuntimeBot({dir,authDir,phone,id}){
     dataDir:dir,authDir,tempDir:path.join(dir,'tmp'),sessionLabel:'portal-'+id.slice(0,8),maxMediaBytes:16*1024*1024},db);
   const hook=()=>{
     const sock=bot.sock;
-    if(!sock?.ev||sock.__vvHooked)return;
-    sock.__vvHooked=true;
-    sock.ev.on('messages.upsert',({messages})=>{for(const m of messages)remember(m);});
+    if(sock?.ev&&!sock.__vvHooked){
+      sock.__vvHooked=true;
+      sock.ev.on('messages.upsert',({messages})=>{for(const m of messages)remember(m);});
+    }
+    const h=bot.onMessages;
+    if(typeof h==='function'&&!h.__vv){
+      const wrapped=async(...a)=>{rememberMany(a);return h(...a);};
+      wrapped.__vv=true;
+      bot.onMessages=wrapped;
+    }
   };
   hook();
   const vvTimer=setInterval(hook,1000);
