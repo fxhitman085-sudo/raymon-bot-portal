@@ -100,7 +100,29 @@ async function v5LoadChat(force=false){
  }catch(error){$('v5-chat-status').textContent=error.message;}
  finally{v5ChatBusy=false;}
 }
-$('view-community').addEventListener('click',()=>void v5LoadChat(true));
+async function v5LoadMyBetas(){
+ if(!current?.user)return;
+ const host=$('v5-my-betas'),panel=$('v5-beta-panel');
+ const {betas}=await request('/api/v5/my-betas');
+ panel.hidden=!betas.length;host.replaceChildren();
+ for(const release of betas){
+  const form=element('form',undefined,'v5-release-card v5-form');
+  form.append(element('strong',release.version+' · '+release.title),
+    element('p',release.description,'small muted'));
+  const label=element('label','Send beta feedback');
+  const input=element('textarea');input.maxLength=1200;input.required=true;input.rows=3;
+  label.append(input);form.append(label);
+  const button=element('button','Submit Feedback','button subtle');button.type='submit';form.append(button);
+  form.addEventListener('submit',event=>{
+   event.preventDefault();action(button,async()=>{
+    await request('/api/v5/feedback',{releaseId:release.id,text:input.value});
+    input.value='';note('Feedback submitted. Thank you for helping test this update.');
+   });
+  });
+  host.append(form);
+ }
+}
+$('view-community').addEventListener('click',()=>{void v5LoadChat(true);void v5LoadMyBetas().catch(()=>{});});
 $('v5-chat-refresh').addEventListener('click',()=>void v5LoadChat(true));
 $('v5-chat-form').addEventListener('submit',event=>{
  event.preventDefault();
