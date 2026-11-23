@@ -1247,6 +1247,7 @@ test('V5 releases enforce founder confirmation and tier-specific beta audiences'
  v5.audience(owner,{releaseId,tiers:['gold'],users:[]});
  assert.throws(()=>v5.transition(owner,releaseId,'beta','incorrect'),{status:400});
  v5.transition(owner,releaseId,'beta','v5.1.0');
+ assert.equal(v5.hasAccess(member,'community_chat'),true,'Existing global chat remains live during beta');
  assert.equal(v5.myBetas(member).some(r=>r.id===releaseId),false);
  store.vip.grant(owner,{userId:member,tier:'gold',days:2});
  assert.equal(v5.myBetas(member).some(r=>r.id===releaseId),true);
@@ -1254,6 +1255,9 @@ test('V5 releases enforce founder confirmation and tier-specific beta audiences'
  assert.equal(v5.feedbackList(owner,releaseId).length,1);
  v5.transition(owner,releaseId,'global','v5.1.0');
  assert.equal(v5.releases(owner).find(r=>r.id===releaseId).state,'global');
+ v5.transition(owner,releaseId,'rollback','v5.1.0');
+ assert.equal(v5.releases(owner).find(r=>r.id===releaseId).state,'paused');
+ assert.equal(v5.hasAccess(member,'community_chat'),true);
 });
 
 test('V5 VIP galleries isolate bot images, enforce tiers and respect expiration',t=>{
@@ -1264,9 +1268,13 @@ test('V5 VIP galleries isolate bot images, enforce tiers and respect expiration'
  assert.equal(v5.menu(member,bot.id).enabled,false);
  assert.throws(()=>v5.addImage(member,bot.id,Buffer.from('test')),{status:403});
  store.vip.grant(owner,{userId:member,tier:'diamond',minutes:5});
+ assert.throws(()=>v5.setGalleryLimit(member,'diamond',4),{status:403});
+ v5.setGalleryLimit(owner,'diamond',4);
+ assert.equal(v5.menu(member,bot.id).limit,4);
  const first=v5.addImage(member,bot.id,Buffer.from('img one')).id;
  const second=v5.addImage(member,bot.id,Buffer.from('img two')).id;
- v5.menuConfigure(member,bot.id,{mode:'random',active:[first,second]});
+ v5.menuConfigure(member,bot.id,{mode:'random',active:[first,second],order:[second,first]});
+ assert.equal(v5.menu(member,bot.id).images[0].id,second);
  assert.equal(v5.menu(member,bot.id).images.length,2);
  const live=v5.workerMenu(bot.id);
  assert.equal(live.enabled,true);
