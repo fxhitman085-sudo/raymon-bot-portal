@@ -116,13 +116,13 @@ async function showProfileVip(panel,target){
     for(const key of ['silver','gold','diamond'])choice.append(new Option(vipLabel(key),key));
     if(tier)choice.value=tier;
     v3Field(form,'VIP tier',choice);
-    const days=v3Field(form,'Duration in days',v3Input('number',{min:1,max:365,value:30,required:true}));
+    const duration=vipGrantDuration(form);
     const save=async payload=>{
       await request('/api/vip',{...payload,userId:target.id});
       if(panel.isConnected)await showProfileVip(panel,target);
       note('Membership updated for '+target.name+'.');
     };
-    v3Submit(form,'Save VIP',()=>save({action:'grant',tier:choice.value,days:Number(days.value)}));
+    v3Submit(form,'Save VIP',()=>save({action:'grant',tier:choice.value,...duration()}));
     panel.replaceChildren(form);
     if(tier)panel.append(v3Button('Remove VIP',async()=>{
       if(window.confirm('Remove VIP from '+target.name+' immediately?'))await save({action:'revoke'});
