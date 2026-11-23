@@ -27,6 +27,12 @@ class UpgradeV5 {
     state TEXT NOT NULL CHECK(state IN ('draft','beta','global','paused')),
     created INTEGER NOT NULL,updated INTEGER NOT NULL,actor TEXT NOT NULL REFERENCES users(id)
    );
+   CREATE TABLE IF NOT EXISTS v5_release_history(
+    id TEXT PRIMARY KEY,release_id TEXT NOT NULL REFERENCES v5_releases(id),
+    actor TEXT NOT NULL REFERENCES users(id),
+    from_state TEXT,to_state TEXT NOT NULL,created INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS v5_release_history_order ON v5_release_history(release_id,created DESC);
    CREATE TABLE IF NOT EXISTS v5_release_audience(
     release_id TEXT NOT NULL REFERENCES v5_releases(id),kind TEXT NOT NULL CHECK(kind IN ('user','tier')),
     value TEXT NOT NULL,PRIMARY KEY(release_id,kind,value)
@@ -58,8 +64,11 @@ class UpgradeV5 {
   ]){
    if(!this.s.get('SELECT 1 FROM v5_releases WHERE feature=? LIMIT 1',feature)){
     const now=this.s.clock();
+    const rid=randomUUID();
     this.s.run("INSERT INTO v5_releases VALUES (?,?,?,?,?,'global',?,?,?)",
-      randomUUID(),version,title,'First stable release',feature,now,now,actor.id);
+      rid,version,title,'First stable release',feature,now,now,actor.id);
+    this.s.run("INSERT INTO v5_release_history VALUES (?,?,?,?,?,?)",
+      randomUUID(),rid,actor.id,null,'global',now);
    }
   }
  }
@@ -202,22 +211,43 @@ class UpgradeV5 {
   this.founder(id);
   const r=this.s.get('SELECT * FROM v5_releases WHERE id=?',releaseId);
   if(!r)this.fail(404,'Release not found.');
-  if(!['beta','global','paused'].includes(next))this.fail(400,'Unknown release status.');
+  if(!['beta','global','paused','rollback'].includes(next))this.fail(400,'Unknown release status.');
   if(confirmation!==r.version)this.fail(400,'Type the release version to confirm.');
   if(next==='beta'&&r.state!=='draft'&&r.state!=='paused')this.fail(409,'Start beta from a draft or paused release.');
   if(next==='global'&&r.state!=='beta')this.fail(409,'Only a tested beta can launch globally.');
   if(next==='paused'&&!['beta','global'].includes(r.state))this.fail(409,'Only active releases can be paused.');
+  if(next==='rollback'&&r.state!=='global')this.fail(409,'Only the current global release can be rolled back.');
   if(next==='beta'&&!this.s.get('SELECT 1 FROM v5_release_audience WHERE release_id=?',releaseId))this.fail(409,'Select testers before starting beta.');
   // A feature shipped in this application is switched by a server-side feature gate;
   // code not present in this deployed version cannot be pushed by this control.
+  let actual=next;
   this.s.tx(()=>{
-   if(next!=='paused')this.s.run("UPDATE v5_releases SET state='paused',updated=? WHERE feature=? AND id<>? AND state IN ('beta','global')",this.s.clock(),r.feature,releaseId);
-   this.s.run('UPDATE v5_releases SET state=?,updated=? WHERE id=?',next,this.s.clock(),releaseId);
-   this.s.v3.audit(id,'release.'+next,releaseId,r.version+' · '+r.feature);
-   if(next==='global')this.s.run('INSERT INTO portal_announcements VALUES (?,?,?,?)',
-    randomUUID(),'RAYMON BOT '+r.version+' released',r.title+' — '+r.description,this.s.clock());
+   const now=this.s.clock();
+   if(next==='rollback'){
+    const old=this.s.get(`SELECT rr.id,rr.version FROM v5_releases rr JOIN v5_release_history h ON h.release_id=rr.id
+      WHERE rr.feature=? AND rr.id<>? AND rr.state='paused' AND h.to_state='global'
+      ORDER BY h.created DESC LIMIT 1`,r.feature,releaseId);
+    if(!old)this.fail(409,'No previous stable release is available to restore.');
+    this.s.run("UPDATE v5_releases SET state='paused',updated=? WHERE id=?",now,releaseId);
+    this.s.run("UPDATE v5_releases SET state='global',updated=? WHERE id=?",now,old.id);
+    this.s.run('INSERT INTO v5_release_history VALUES (?,?,?,?,?,?)',randomUUID(),releaseId,id,r.state,'paused',now);
+    this.s.run('INSERT INTO v5_release_history VALUES (?,?,?,?,?,?)',randomUUID(),old.id,id,'paused','global',now);
+    this.s.v3.audit(id,'release.rollback',releaseId,'Restored '+old.version);
+    actual='global';
+   }else{
+    // Beta and the current stable version run side by side. Only a global
+    // launch replaces the stable release, preventing unselected users from
+    // losing core community features while new changes are tested.
+    if(next==='beta')this.s.run("UPDATE v5_releases SET state='paused',updated=? WHERE feature=? AND id<>? AND state='beta'",now,r.feature,releaseId);
+    if(next==='global')this.s.run("UPDATE v5_releases SET state='paused',updated=? WHERE feature=? AND id<>? AND state IN ('beta','global')",now,r.feature,releaseId);
+    this.s.run('UPDATE v5_releases SET state=?,updated=? WHERE id=?',next,now,releaseId);
+    this.s.run('INSERT INTO v5_release_history VALUES (?,?,?,?,?,?)',randomUUID(),releaseId,id,r.state,next,now);
+    this.s.v3.audit(id,'release.'+next,releaseId,r.version+' · '+r.feature);
+    if(next==='global')this.s.run('INSERT INTO portal_announcements VALUES (?,?,?,?)',
+     randomUUID(),'RAYMON BOT '+r.version+' released',r.title+' — '+r.description,now);
+   }
   });
-  return {ok:true,state:next};
+  return {ok:true,state:actual};
  }
  myBetas(id){
   this.s.requireActive(id);this.seed();
