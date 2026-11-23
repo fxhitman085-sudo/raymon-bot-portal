@@ -1,5 +1,6 @@
 const community=require('./community');
 const {Vip}=require('./vip');
+const {UpgradeV5}=require('./upgrade-v5');
 const {Diagnostics}=require('./pairing-diagnostics');
 const {Recovery}=require('./recovery');
 const {DEFAULTS,validate,groupId,groupOptions}=require('./bot-settings');
@@ -144,6 +145,7 @@ class Store {
     this.vip=new Vip(this,PortalError);
     this.diagnostics=new Diagnostics(this,PortalError);
     this.recovery=new Recovery(this);
+    this.upgrade5=new UpgradeV5(this,PortalError);
     community.init(this);
   }
   get(sql,...params){return this.db.prepare(sql).get(...params);}
@@ -691,6 +693,7 @@ class Store {
         return {id:d.id,phone:d.phone,generation:d.generation,intent:d.intent,
           ...(restart?{restart}:{}),
           community:community.task(this,d),
+          menuRevision:this.upgrade5.workerMenu(d.id).revision||null,
           pairUntil:d.pair_until,permitUntil:d.paid_until>now?Math.min(d.paid_until,now+12_000):0,
           ...(groups&&!groups.result&&groups.generation===d.generation?{groups}:{}),
           ...(settings?.revision?{settings:{revision:settings.revision,patch:JSON.parse(settings.patch)}}:{})};
