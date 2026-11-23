@@ -76,7 +76,7 @@ class UpgradeV5 {
  hasAccess(id,feature){
   const r=this.release(feature);
   if(!r)return false;
-  if(r.state==='global')return true;
+  if(r.state==='global'||this.s.get("SELECT 1 FROM v5_releases WHERE feature=? AND state='global'",feature))return true;
   const member=this.s.vip.membership(id)?.tier;
   return !!this.s.get(`SELECT 1 FROM v5_release_audience WHERE release_id=?
     AND ((kind='user' AND value=?) OR (kind='tier' AND value=?)) LIMIT 1`,r.id,id,member||'');
@@ -109,6 +109,7 @@ class UpgradeV5 {
   return this.s.tx(()=>{
    const previous=this.s.get('SELECT last_post FROM v5_chat_limits WHERE user_id=?',id);
    if(previous&&now-previous.last_post<2500)this.fail(429,'Please wait before sending another message.');
+   if(this.s.get('SELECT COUNT(*) AS n FROM v5_chat_messages WHERE user_id=? AND created>?',id,now-60_000).n>=18)this.fail(429,'Chat slow mode: try again shortly.');
    const uuid=randomUUID();
    this.s.run('INSERT INTO v5_chat_messages(id,user_id,message,reply_to,created) VALUES (?,?,?,?,?)',uuid,id,message,replyTo,now);
    this.s.run(`INSERT INTO v5_chat_limits VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET last_post=excluded.last_post`,id,now);
@@ -216,10 +217,21 @@ class UpgradeV5 {
   });
   return {ok:true,state:next};
  }
+ myBetas(id){
+  this.s.requireActive(id);this.seed();
+  const releases=this.s.all("SELECT * FROM v5_releases WHERE state='beta' ORDER BY updated DESC LIMIT 30");
+  return releases.filter(r=>this.isTester(id,r)).map(r=>({id:r.id,title:r.title,version:r.version,
+    feature:r.feature,description:r.description}));
+ }
+ isTester(id,r){
+  const tier=this.s.vip.membership(id)?.tier;
+  return !!this.s.get(`SELECT 1 FROM v5_release_audience WHERE release_id=?
+    AND ((kind='user' AND value=?) OR (kind='tier' AND value=?))`,r.id,id,tier||'');
+ }
  feedback(id,releaseId,description){
   this.s.requireActive(id);
   const r=this.s.get('SELECT * FROM v5_releases WHERE id=?',releaseId);
-  if(!r||r.state!=='beta'||!this.hasAccess(id,r.feature)||this.release(r.feature)?.id!==releaseId)this.fail(403,'Beta access required.');
+  if(!r||r.state!=='beta'||!this.isTester(id,r))this.fail(403,'Beta access required.');
   const text=cleanText(description,1200);if(!text)this.fail(400,'Enter beta feedback.');
   this.s.run('INSERT INTO v5_release_feedback VALUES (?,?,?,?)',releaseId,id,text,this.s.clock());
   return {ok:true};
