@@ -716,3 +716,10 @@ button[aria-busy="true"]::after {
 #chat-view .v5-chat-input-row input{border-radius:22px;padding-inline:16px;font-size:16px}
 #chat-view .v5-chat-input-row button{border-radius:22px;padding-inline:18px}
 @media(max-width:700px){#chat-view .chat-shell{height:calc(100dvh - 88px);max-height:none;border-radius:10px}.chat-bar{padding:8px 12px}}
+
+.member-link,.member-badges{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.member-link{font:inherit;color:inherit;border:0;padding:0;background:transparent;cursor:pointer}
+.member-photo{display:inline-grid;place-items:center;position:relative;overflow:hidden;width:32px;height:32px;flex:none;border-radius:50%;background:#234574;color:white;font-weight:650}
+.member-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.member-profile{width:min(320px,88vw);text-align:center;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--text);padding:24px}
+.member-profile::backdrop{background:#0009}.member-profile .member-photo{width:80px;height:80px;font-size:1.7rem}.member-profile h2{overflow-wrap:anywhere}.member-profile button{display:block;margin:18px auto 0}

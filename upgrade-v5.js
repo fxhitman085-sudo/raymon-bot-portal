@@ -98,13 +98,14 @@ class UpgradeV5 {
   this.s.requireActive(id);
   if(!this.hasAccess(id,'community_chat'))return {enabled:false,messages:[]};
   const cutoff=Number.isSafeInteger(after)&&after>=0?after:0;
-  const rows=this.s.all(`SELECT m.id,m.user_id AS userId,u.name,u.banned,p.closed_at,
+  const rows=this.s.all(`SELECT m.id,m.user_id AS userId,u.name,u.banned,p.closed_at,a.version AS avatarVersion,
       m.message,m.reply_to AS replyTo,m.created,m.edited,m.deleted,m.pinned
     FROM v5_chat_messages m JOIN users u ON u.id=m.user_id
     LEFT JOIN portal_profiles p ON p.user_id=u.id
+    LEFT JOIN portal_avatars a ON a.user_id=u.id
     WHERE m.created>? ORDER BY m.created DESC,m.rowid DESC LIMIT 100`,cutoff).reverse();
   return {enabled:true,messages:rows.map(r=>({
-   id:r.id,userId:r.userId,name:r.name,role:this.role(r.userId).role,
+   id:r.id,userId:r.userId,name:r.name,avatarVersion:r.banned||r.closed_at?null:r.avatarVersion,role:this.role(r.userId).role,
    vip:this.role(r.userId).vip,message:r.deleted?'':r.message,
    replyTo:r.replyTo,created:r.created,edited:r.edited,deleted:!!r.deleted,pinned:!!r.pinned
   }))};
@@ -204,7 +205,7 @@ class UpgradeV5 {
  audience(id,{releaseId,users=[],tiers:chosen=[]}){
   this.founder(id);
   const r=this.s.get('SELECT * FROM v5_releases WHERE id=?',releaseId);
-  if(!r||!['draft','beta'].includes(r.state))this.fail(409,'Choose a draft or beta release.');
+  if(!r||!['draft','beta','paused'].includes(r.state))this.fail(409,'Choose a draft, paused or beta release.');
   if(!Array.isArray(users)||users.length>100||!Array.isArray(chosen)||chosen.length>3||chosen.some(t=>!tiers.includes(t)))this.fail(400,'Choose valid beta testers.');
   const allUsers=[...new Set(users)];
   for(const uid of allUsers)if(!this.s.user(uid)||this.s.user(uid).banned||this.s.user(uid).closed_at)this.fail(400,'One of the selected testers does not exist.');

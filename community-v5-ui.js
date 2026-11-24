@@ -1,9 +1,34 @@
 'use strict';
 /* V5 controls use existing authenticated request(), element(), and VIP asset URLs. */
 let v5LastMessage=0,v5ChatBusy=false,v5ChatReply=null,v5MenuState=null,v5MenuBot=null,v5ChatInitialized=false;
+function memberAvatar(row){
+ const avatar=element('span',initials(row.name),'member-photo');
+ if(row.avatarVersion){
+  const img=element('img');img.alt='';img.loading='lazy';
+  img.src='/api/v5/member-avatar?'+new URLSearchParams({user:row.userId,v:row.avatarVersion});
+  img.addEventListener('error',()=>img.remove(),{once:true});avatar.append(img);
+ }
+ return avatar;
+}
+function openMemberProfile(row){
+ const dialog=element('dialog',undefined,'member-profile');
+ dialog.setAttribute('aria-label','Member profile');
+ const close=element('button','Close','button subtle');
+ close.addEventListener('click',()=>dialog.close());
+ dialog.append(memberAvatar(row),element('h2',row.name),memberBadges(row),close);
+ dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+ document.body.append(dialog);dialog.showModal();
+}
 function v5ChatBadge(row){
  const group=element('span',undefined,'v5-chat-head');
- group.append(element('strong',row.name));
+ const person=element('button',undefined,'member-link');person.type='button';
+ person.setAttribute('aria-label','View profile of '+row.name);
+ person.append(memberAvatar(row),element('strong',row.name));
+ person.addEventListener('click',()=>openMemberProfile(row));
+ group.append(person,memberBadges(row));return group;
+}
+function memberBadges(row){
+ const group=element('span',undefined,'member-badges');
  const allowed=['FOUNDER','ADMIN','SENIOR ADMIN','CHIEF ADMIN'];
  if(allowed.includes(row.role)){
   const badge=element('span',row.role,'v5-staff-badge v5-role-'+row.role.replaceAll(' ','-'));
@@ -297,14 +322,20 @@ async function v5LoadReleases(){
     element('p',release.feature.replaceAll('_',' ')+' · '+release.state.toUpperCase()+' · '+release.feedback+' feedback entries','small muted'));
   const label=element('p','Beta Testers: '+release.audience.map(x=>x.kind==='tier'?x.value.toUpperCase()+' VIP':'Selected user').join(', ')||'None','small');
   card.append(label);
-  if(['draft','beta'].includes(release.state)){
+  let editor;
+  if(['draft','beta','paused'].includes(release.state)){
    const audienceForm=element('form',undefined,'v5-release-form');
    audienceForm.append(element('p','Select VIP tiers (or search for specific users).','small'));
+   const all=element('input');all.type='checkbox';
+   const allLabel=element('label');allLabel.append(all,element('span','All VIP members'));audienceForm.append(allLabel);
    const checks=[];
    for(const tier of ['silver','gold','diamond']){
     const input=element('input');input.type='checkbox';input.checked=release.audience.some(x=>x.kind==='tier'&&x.value===tier);
     const box=element('label');box.append(input,element('span',tier.toUpperCase()+' VIP'));checks.push([tier,input]);audienceForm.append(box);
    }
+   const syncAll=()=>{all.checked=checks.every(([,c])=>c.checked);all.indeterminate=!all.checked&&checks.some(([,c])=>c.checked);};
+   syncAll();for(const [,c] of checks)c.addEventListener('change',syncAll);
+   all.addEventListener('change',()=>{for(const [,c] of checks)c.checked=all.checked;syncAll();});
    const selected=new Set(release.audience.filter(x=>x.kind==='user').map(x=>x.value));
    const chips=element('div');
    function renderChips(){
@@ -334,13 +365,21 @@ async function v5LoadReleases(){
    const save=element('button','Save Beta Audience','button primary');save.type='submit';audienceForm.append(save);
    audienceForm.addEventListener('submit',event=>{
     event.preventDefault();
-    action(save,async()=>{
+    const submit=event.submitter||save;
+    action(submit,async()=>{
+     const resume=submit.dataset.resume==='yes';
+     if(resume&&!selected.size&&!checks.some(([,c])=>c.checked))throw Error('Select at least one tester or VIP tier.');
      await request('/api/v5/releases',{action:'audience',releaseId:release.id,
        tiers:checks.filter(x=>x[1].checked).map(x=>x[0]),users:[...selected]});
-     await v5LoadReleases();note('Beta audience saved.');
+     if(resume)await request('/api/v5/releases',{action:'transition',releaseId:release.id,state:'beta',confirmation:release.version});
+     await v5LoadReleases();note(resume?'Beta resumed.':'Beta audience saved.');
     });
    });
-   card.append(audienceForm);
+   if(release.state==='paused'){
+    editor=element('details');editor.append(element('summary','Edit Testers'),audienceForm);
+    const resume=element('button','Save & Resume','button primary');resume.type='submit';audienceForm.append(resume);
+    resume.dataset.resume='yes';card.append(editor);
+   }else card.append(audienceForm);
   }
   const actions=element('div',undefined,'actions');
   const transitions=release.state==='draft'?[['Start Beta','beta']]:
@@ -350,6 +389,7 @@ async function v5LoadReleases(){
    const button=element('button',label,'button '+(state==='global'?'primary':'subtle'));
    button.type='button';
    button.addEventListener('click',async()=>{
+    if(editor&&state==='beta'){editor.open=true;editor.scrollIntoView({block:'center'});editor.querySelector('input')?.focus({preventScroll:true});return;}
     const confirmation=window.prompt(state==='global'?'FOUNDER GLOBAL LAUNCH — type '+release.version+' to confirm publishing to all users.':state==='rollback'?'FOUNDER ROLLBACK — type '+release.version+' to restore the previous stable version.':'Type '+release.version+' to confirm the release change.');
     if(confirmation===null)return;
     try{

@@ -346,6 +346,15 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
       if(!user)throw new PortalError(401,'Sign in to continue.');
       if(route.startsWith('/api/v5/')){
         const api=store.upgrade5;
+        if(method==='GET'&&route==='/api/v5/member-avatar'){
+          store.requireActive(user.id);
+          if(!api.hasAccess(user.id,'community_chat'))throw new PortalError(403,'Chat access required.');
+          const member=store.user(url.searchParams.get('user'));
+          const photo=member&&!member.banned&&!member.closed_at&&store.avatar(member.id);
+          if(!photo)throw new PortalError(404,'No profile photo.');
+          res.writeHead(200,{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=300'});
+          return res.end(photo.jpeg);
+        }
         if(method==='GET'&&route==='/api/v5/chat'){
           return json(res,200,api.messages(user.id,Number(url.searchParams.get('after')||0)));
         }
