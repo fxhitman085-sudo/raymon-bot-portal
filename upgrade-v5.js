@@ -2,6 +2,13 @@
 const {randomUUID}=require('node:crypto');
 const cleanText=(value,max)=>typeof value==='string'&&value.trim().length>0&&value.trim().length<=max&&!/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)?value.trim():null;
 const tiers=['silver','gold','diamond'];
+function mentionPositions(text,tag){
+ const positions=[];
+ for(let i=text.indexOf(tag);i>=0;i=text.indexOf(tag,i+tag.length)){
+  if((i===0||/\s/.test(text[i-1]))&&!/[\p{L}\p{N}_-]/u.test(text[i+tag.length]||''))positions.push(i);
+ }
+ return positions;
+}
 class UpgradeV5 {
  constructor(s,ErrorType){
   this.s=s;this.Error=ErrorType;
@@ -12,6 +19,10 @@ class UpgradeV5 {
     edited INTEGER,deleted INTEGER NOT NULL DEFAULT 0,pinned INTEGER NOT NULL DEFAULT 0
    );
    CREATE INDEX IF NOT EXISTS v5_chat_order ON v5_chat_messages(created DESC,id DESC);
+   CREATE TABLE IF NOT EXISTS v5_chat_mentions(
+    message_id TEXT NOT NULL REFERENCES v5_chat_messages(id),user_id TEXT NOT NULL REFERENCES users(id),
+    tag TEXT NOT NULL,event_id TEXT UNIQUE REFERENCES portal_events(id),PRIMARY KEY(message_id,user_id)
+   );
    CREATE TABLE IF NOT EXISTS v5_chat_reports(
     message_id TEXT NOT NULL REFERENCES v5_chat_messages(id),
     reporter_id TEXT NOT NULL REFERENCES users(id),reason TEXT NOT NULL,created INTEGER NOT NULL,
@@ -94,7 +105,17 @@ class UpgradeV5 {
     AND ((kind='user' AND value=?) OR (kind='tier' AND value=?)) LIMIT 1`,r.id,id,member||'');
  }
  // Existing community chat can be turned off immediately via release state.
- messages(id,after=0){
+ mentionMembers(id,query){
+  this.s.requireActive(id);
+  if(!this.hasAccess(id,'community_chat'))this.fail(403,'Chat access required.');
+  const term=String(query||'').trim().slice(0,90);
+  return this.s.all(`SELECT u.id AS userId,u.name,p.username,a.version AS avatarVersion
+    FROM users u LEFT JOIN portal_profiles p ON p.user_id=u.id LEFT JOIN portal_avatars a ON a.user_id=u.id
+    WHERE u.id<>? AND u.banned=0 AND p.closed_at IS NULL AND
+    (instr(lower(u.name),lower(?)) OR instr(lower(coalesce(p.username,'')),lower(?)))
+    ORDER BY u.name COLLATE NOCASE,u.id LIMIT 30`,id,term,term).filter(r=>this.hasAccess(r.userId,'community_chat')).slice(0,10);
+ }
+ messages(id,after=0,target=null){
   this.s.requireActive(id);
   if(!this.hasAccess(id,'community_chat'))return {enabled:false,messages:[]};
   const cutoff=Number.isSafeInteger(after)&&after>=0?after:0;
@@ -103,16 +124,17 @@ class UpgradeV5 {
     FROM v5_chat_messages m JOIN users u ON u.id=m.user_id
     LEFT JOIN portal_profiles p ON p.user_id=u.id
     LEFT JOIN portal_avatars a ON a.user_id=u.id
-    WHERE m.created>? ORDER BY m.created DESC,m.rowid DESC LIMIT 100`,cutoff).reverse();
+    WHERE m.created>? AND (? IS NULL OR m.id=?) ORDER BY m.created DESC,m.rowid DESC LIMIT 100`,cutoff,target,target).reverse();
   return {enabled:true,messages:rows.map(r=>({
    id:r.id,userId:r.userId,name:r.name,avatarVersion:r.banned||r.closed_at?null:r.avatarVersion,role:this.role(r.userId).role,
-   vip:this.role(r.userId).vip,message:r.deleted?'':r.message,
+   tags:r.deleted?[]:this.s.all('SELECT tag FROM v5_chat_mentions WHERE message_id=?',r.id).map(m=>m.tag),vip:this.role(r.userId).vip,message:r.deleted?'':r.message,
    replyTo:r.replyTo,created:r.created,edited:r.edited,deleted:!!r.deleted,pinned:!!r.pinned
   }))};
  }
- send(id,text,replyTo=null){
+ send(id,text,replyTo=null,mentions=[]){
   this.s.requireActive(id);
   if(!this.hasAccess(id,'community_chat'))this.fail(403,'Community chat is not available to your account yet.');
+  if(!Array.isArray(mentions)||mentions.length>25)this.fail(400,'Select up to 25 members per message.');
   const message=cleanText(text,1200);
   if(!message)this.fail(400,'Enter a message of up to 1,200 characters.');
   const now=this.s.clock(),mute=this.s.get('SELECT until FROM v5_chat_mutes WHERE user_id=?',id);
@@ -126,6 +148,16 @@ class UpgradeV5 {
    const uuid=randomUUID();
    this.s.run('INSERT INTO v5_chat_messages(id,user_id,message,reply_to,created) VALUES (?,?,?,?,?)',uuid,id,message,replyTo,now);
    this.s.run(`INSERT INTO v5_chat_limits VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET last_post=excluded.last_post`,id,now);
+   for(const uid of new Set(mentions)){
+    if(typeof uid!=='string'||uid===id)continue;
+    const member=this.s.user(uid);
+    if(!member||member.banned||member.closed_at||!this.hasAccess(uid,'community_chat'))continue;
+    const profile=this.s.get('SELECT username FROM portal_profiles WHERE user_id=?',uid);
+    const tag='@'+(profile?.username||member.name);
+    if(!mentionPositions(message,tag).length)continue;
+    const event=this.s.event(uid,null,'Community Chat mention',this.s.user(id).name+' mentioned you in Community Chat.');
+    this.s.run('INSERT INTO v5_chat_mentions VALUES (?,?,?,?)',uuid,uid,tag,event);
+   }
    return {id:uuid,created:now};
   });
  }

@@ -377,11 +377,11 @@ class Store {
     });
   }
   notices(user){
-    const entries=this.all(`SELECT e.id,e.title,e.description,e.created,n.ticket_id AS ticketId,n.staff AS staffTicket
-      FROM portal_events e LEFT JOIN v3_ticket_notices n ON n.event_id=e.id WHERE e.user_id=?
-      UNION ALL SELECT 'billing:'||id,'Bot maintenance charge',reason||' ('||delta||' coins)',created,NULL,NULL
+    const entries=this.all(`SELECT e.id,e.title,e.description,e.created,n.ticket_id AS ticketId,n.staff AS staffTicket,m.message_id AS chatMessageId
+      FROM portal_events e LEFT JOIN v3_ticket_notices n ON n.event_id=e.id LEFT JOIN v5_chat_mentions m ON m.event_id=e.id WHERE e.user_id=?
+      UNION ALL SELECT 'billing:'||id,'Bot maintenance charge',reason||' ('||delta||' coins)',created,NULL,NULL,NULL
       FROM ledger WHERE user_id=? AND kind='uptime'
-      UNION ALL SELECT 'announcement:'||id,title,description,created,NULL,NULL FROM portal_announcements
+      UNION ALL SELECT 'announcement:'||id,title,description,created,NULL,NULL,NULL FROM portal_announcements
       WHERE created>=? ORDER BY created DESC LIMIT 80`,user.id,user.id,user.created);
     for(const bot of this.deployments(user.id)){
       if(this.lowBalance(bot,user))entries.unshift({id:'low:'+bot.id+':'+bot.paid_until,title:'Low coin balance',

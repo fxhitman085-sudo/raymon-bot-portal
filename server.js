@@ -359,13 +359,14 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
           res.writeHead(200,{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=300'});
           return res.end(photo.jpeg);
         }
+        if(method==='GET'&&route==='/api/v5/mention-members')return json(res,200,{members:api.mentionMembers(user.id,url.searchParams.get('q'))});
         if(method==='GET'&&route==='/api/v5/chat'){
-          return json(res,200,api.messages(user.id,Number(url.searchParams.get('after')||0)));
+          return json(res,200,api.messages(user.id,Number(url.searchParams.get('after')||0),url.searchParams.get('target')));
         }
         if(method==='GET'&&route==='/api/v5/reports')return json(res,200,{reports:api.reports(user.id)});
         if(method==='POST'&&route==='/api/v5/chat'){
           const d=await body(req);
-          return json(res,201,api.send(user.id,d?.text,d?.replyTo||null));
+          return json(res,201,api.send(user.id,d?.text,d?.replyTo||null,d?.mentions));
         }
         if(method==='POST'&&route==='/api/v5/chat-action'){
           rateLimit(req,user.id,'v5-action');

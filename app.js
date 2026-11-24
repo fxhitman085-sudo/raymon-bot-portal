@@ -954,6 +954,7 @@ function drawEvents(id,rows,empty,noticeActions=false){
     if(noticeActions){
       entry.classList.toggle('unread',!row.read);
       const controls=element('div',undefined,'actions');
+      if(row.chatMessageId)controls.append(v3Button('Open message',()=>openChatMention(row.chatMessageId),'primary'));
       if(row.ticketId&&(!row.staffTicket||can('tickets.view')))
         controls.append(v3Button('Open ticket',()=>openTicketNotice(row),'primary'));
       for(const [command,label] of [['read','Mark as read'],['dismiss','Dismiss']]){

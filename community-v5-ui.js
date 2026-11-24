@@ -48,6 +48,88 @@ function v5ChatTime(row){
  clock.dateTime=new Date(row.created).toISOString();
  return clock;
 }
+function mentionPositions(text,tag){
+ const positions=[];
+ for(let i=text.indexOf(tag);i>=0;i=text.indexOf(tag,i+tag.length)){
+  if((i===0||/\s/.test(text[i-1]))&&!/[\p{L}\p{N}_-]/u.test(text[i+tag.length]||''))positions.push(i);
+ }
+ return positions;
+}
+
+function chatMessageBody(row){
+ const p=element('p');
+ if(row.deleted){p.textContent='Message deleted';return p;}
+ const spans=(row.tags||[]).flatMap(tag=>mentionPositions(row.message,tag).map(start=>({tag,start})))
+   .sort((a,b)=>a.start-b.start||b.tag.length-a.tag.length);
+ let cursor=0;
+ for(const {tag,start} of spans){
+  if(start<cursor)continue;
+  p.append(row.message.slice(cursor,start),element('strong',tag,'chat-mention'));
+  cursor=start+tag.length;
+ }
+ p.append(row.message.slice(cursor));return p;
+}
+let linkedMessage=null;
+async function openChatMention(id){
+ const data=await request('/api/v5/chat?target='+encodeURIComponent(id));
+ if(!data.enabled||!data.messages.length)throw Error('This message is unavailable.');
+ $('notifications-dialog').close();
+ switchView('chat');
+ linkedMessage=data.messages[0];
+ const latest=await request('/api/v5/chat');
+ if(workspaceView!=='chat')return;
+ renderMentionTimeline(latest.messages||[]);
+ const target=[...chatList.querySelectorAll('article')].find(el=>el.dataset.id===id);
+ if(target){target.tabIndex=-1;target.focus({preventScroll:true});target.scrollIntoView({block:'center'});}
+}
+function renderMentionTimeline(rows){
+ if(linkedMessage&&!rows.some(row=>row.id===linkedMessage.id))rows=[linkedMessage,...rows];
+ v5RenderChat(rows);
+}
+const mentionInput=$('v5-chat-input');
+const picker=element('div',undefined,'mention-picker');
+const selectedTags=element('div',undefined,'selected-mentions');
+mentionInput.closest('form').prepend(selectedTags,picker);
+const mentions=new Map();
+let searchTimer,searchVersion=0;
+function updateTags(){
+ selectedTags.replaceChildren();
+ for(const [id,tag] of mentions){
+  if(!mentionPositions(mentionInput.value,tag).length){mentions.delete(id);continue;}
+  selectedTags.append(element('span',tag,'chat-mention'));
+ }
+}
+function searchMentions(){
+ updateTags();clearTimeout(searchTimer);
+ const version=++searchVersion;
+ picker.replaceChildren();
+ const end=mentionInput.selectionStart;
+ const match=mentionInput.value.slice(0,end).match(/(?:^|\s)@([^@\s]*(?: [^@\s]+)?)$/u);
+ if(!match)return;
+ const start=end-match[1].length-1;
+ searchTimer=setTimeout(async()=>{
+  try{
+   const {members}=await request('/api/v5/mention-members?q='+encodeURIComponent(match[1]));
+   if(version!==searchVersion||workspaceView!=='chat')return;
+   for(const member of members){
+    const choice=element('button',undefined,'mention-choice');choice.type='button';
+    choice.append(memberAvatar(member),element('strong',member.name));
+    if(member.username)choice.append(element('span','@'+member.username,'small'));
+    choice.onclick=()=>{
+     const tag='@'+(member.username||member.name);
+     if(mentionInput.value.length-(end-start)+tag.length+1>1200)return;
+     mentionInput.setRangeText(tag+' ',start,end,'end');
+     for(const [id,value] of mentions)if(value===tag)mentions.delete(id);
+     mentions.set(member.userId,tag);updateTags();++searchVersion;picker.replaceChildren();mentionInput.focus();
+    };
+    picker.append(choice);
+   }
+  }catch(error){if(version===searchVersion)picker.textContent=error.message;}
+ },160);
+}
+mentionInput.addEventListener('input',searchMentions);
+mentionInput.addEventListener('keydown',e=>{if(e.key==='Escape'){++searchVersion;picker.replaceChildren();}});
+
 function v5RenderChat(rows){
  const host=$('v5-chat-messages');
  const currentNearBottom=host.scrollHeight-host.scrollTop-host.clientHeight<90;
@@ -67,7 +149,7 @@ function v5RenderChat(rows){
   item.classList.toggle('chat-own',row.userId===current.user.id);
   item.append(v5ChatBadge(row));
   if(row.replyTo)item.append(element('div','↳ Reply to a previous message','v5-chat-reply'));
-  item.append(element('p',row.deleted?'Message deleted':row.message,row.deleted?'muted':''));
+  item.append(chatMessageBody(row));
   if(row.edited&&!row.deleted)item.append(element('span','Edited','small muted'));
   if(row.pinned&&!row.deleted)item.append(element('span','📌 Pinned','small muted'));
   if(!row.deleted){
@@ -142,7 +224,12 @@ async function v5LoadChat(force=false){
   $('v5-chat-status').textContent=response.enabled?'Group chat':'Community chat is not currently enabled for your account.';
   $('v5-chat-form').hidden=!response.enabled;
   if(response.enabled){
-   v5RenderChat(response.messages||[]);
+   if(linkedMessage&&!response.messages.some(row=>row.id===linkedMessage.id)){
+    const id=linkedMessage.id;
+    const target=await request('/api/v5/chat?target='+encodeURIComponent(id));
+    if(linkedMessage?.id===id)linkedMessage=target.messages[0]||null;
+   }
+   renderMentionTimeline(response.messages||[]);
 
   }else {delete $('v5-chat-messages').dataset.signature;$('v5-chat-messages').replaceChildren(element('p','Community chat is unavailable or in private beta.','muted'));}
  }catch(error){$('v5-chat-status').textContent=error.message;}
@@ -171,7 +258,7 @@ async function v5LoadMyBetas(){
  }
 }
 $('view-community').addEventListener('click',()=>{void v5LoadMyBetas().catch(()=>{});});
-$('view-chat').addEventListener('click',()=>{switchView('chat');void v5LoadChat(true);});
+$('view-chat').addEventListener('click',()=>{linkedMessage=null;switchView('chat');void v5LoadChat(true);});
 const chatList=$('v5-chat-messages');
 chatList.addEventListener('scroll',()=>{$('chat-latest').hidden=chatList.scrollHeight-chatList.scrollTop-chatList.clientHeight<90;});
 $('chat-latest').addEventListener('click',()=>{chatList.scrollTop=chatList.scrollHeight;});
@@ -181,7 +268,8 @@ $('v5-chat-form').addEventListener('submit',event=>{
  action(event.submitter,async()=>{
   const text=$('v5-chat-input').value.trim();
   if(!text)return;
-  await request('/api/v5/chat',{text,replyTo:v5ChatReply});
+  await request('/api/v5/chat',{text,replyTo:v5ChatReply,mentions:[...mentions.keys()]});
+  mentions.clear();selectedTags.replaceChildren();picker.replaceChildren();++searchVersion;linkedMessage=null;
   $('v5-chat-input').value='';v5ChatReply=null;$('v5-chat-input').placeholder='Message';
   await v5LoadChat(true);
  });
