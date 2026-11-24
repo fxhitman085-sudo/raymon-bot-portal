@@ -139,6 +139,23 @@ function profileMenu(target){
   vipPanel.id='profile-vip-controls';
   vipPanel.hidden=true;
   menu.after(vipPanel);
+  $('admin-number-setting')?.remove();
+  const visibility=element('label',undefined,'reward-toggle');
+  visibility.id='admin-number-setting';
+  const check=element('input');check.type='checkbox';check.checked=!!target.showAdminNumber;
+  visibility.append(check,element('span','Show number in .admin'));
+  const canSet=current?.user?.isOwner&&(target.staff||target.founder)&&!target.banned&&!target.closed_at;
+  visibility.hidden=!canSet;
+  menu.after(visibility);
+  check.addEventListener('change',async()=>{
+    const visible=check.checked;
+    check.disabled=true;
+    try{
+      await request('/api/owner/admin-number',{userId:target.id,visible});
+      target.showAdminNumber=visible;note('Staff number visibility saved.');
+    }catch(error){check.checked=!visible;note(error.message,true);}
+    finally{check.disabled=false;}
+  });
   const select=$('action');
   const coins=value=>['grant','remove'].includes(value);
   const options=Array.from(select.options);

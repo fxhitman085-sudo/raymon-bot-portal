@@ -150,6 +150,14 @@ class Worker {
         }
       }
       const {bot,close}=await this.createBot({dir,authDir,phone:task.phone,id:task.id});
+      bot.sessions??={};
+      bot.sessions.onlineAdmins=async()=>{
+        const response=await this.fetcher(new URL('/internal/online-admins',this.url),{
+          headers:{Authorization:'Bearer '+this.token},signal:AbortSignal.timeout(4000)
+        });
+        if(!response.ok)throw Error('Staff directory unavailable');
+        return (await response.json()).admins;
+      };
       entry.bot=bot;
       entry.close=close;
       const allowed=()=>!this.closed&&this.entries.get(task.id)===entry&&entry.verified&&!entry.failure&&
@@ -232,6 +240,18 @@ async function createRuntimeBot({dir,authDir,phone,id}){
       }
     }});
   }
+  commandMap.set('admin',{name:'admin',category:'General',description:'List online portal administrators',usage:'.admin',allowPrivate:true,
+    async execute(ctx){
+      try{
+        const members=await ctx.sessions.onlineAdmins();
+        const lines=members.map(({name,rank,phone},i)=>{
+          const role=rank===8?'Founder':'[Level '+rank+'] '+(rank===7?'Chief Admin':rank>=5?'Senior Admin':'Admin');
+          return (i+1)+'. '+name.replace(/[\r\n]+/g,' ')+' → '+role+(phone?' · '+phone:'');
+        });
+        return {ok:true,message:lines.length?'⚡ RAYMON BOT · Online Admins\n\n'+lines.join('\n'):'No admins are online right now.'};
+      }catch{return {ok:false,message:'The staff directory is unavailable. Please try again shortly.'};}
+    }
+  });
   const announce=commandMap.get('announce');
   if(announce?.mainOwnerOnly)commandMap.set('announce',{
     ...announce,

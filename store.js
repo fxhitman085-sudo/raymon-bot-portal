@@ -47,6 +47,9 @@ class Store {
         kind TEXT NOT NULL, reason TEXT NOT NULL, actor TEXT, created INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS ledger_user ON ledger(user_id,created DESC);
+      CREATE TABLE IF NOT EXISTS hidden_admin_numbers (
+        user_id TEXT PRIMARY KEY REFERENCES users(id)
+      );
       CREATE TABLE IF NOT EXISTS deployments (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE REFERENCES users(id), phone TEXT NOT NULL,
         generation TEXT NOT NULL, intent TEXT NOT NULL, state TEXT NOT NULL, linked INTEGER NOT NULL DEFAULT 0,
@@ -641,6 +644,7 @@ class Store {
   ownerData(search='',id,{phoneSearch=true}={}){
     const q='%'+search.toLowerCase().slice(0,100)+'%';
     const users=this.all(`SELECT u.id,u.email,u.name,u.coins,u.banned,p.closed_at,
+      NOT EXISTS(SELECT 1 FROM hidden_admin_numbers WHERE user_id=u.id) AS showAdminNumber,
       EXISTS(SELECT 1 FROM owner WHERE user_id=u.id) AS founder,
       EXISTS(SELECT 1 FROM v3_admins WHERE user_id=u.id) AS staff FROM users u LEFT JOIN portal_profiles p ON p.user_id=u.id
       WHERE lower(u.email) LIKE ? OR lower(u.name) LIKE ? OR EXISTS
@@ -656,6 +660,32 @@ class Store {
     const daily=this.get("SELECT count(*) AS claims,coalesce(sum(delta),0) AS paid FROM ledger WHERE kind='daily_bonus'");
     return {stats,users,deployments,rewards:{settings:this.rewardConfig(),daily,referrals:this.referralStats()},
       history:id?this.history(id):[],audit:id?this.all('SELECT action,reason,created FROM audit WHERE user_id=? ORDER BY created DESC,rowid DESC LIMIT 50',id):[]};
+  }
+  onlineAdmins(){
+    const now=this.clock();
+    return this.all(`WITH online AS (
+      SELECT u.name,u.id,CASE WHEN o.user_id IS NOT NULL THEN 8 ELSE a.level END AS rank,
+        CASE WHEN h.user_id IS NULL THEN d.verified_phone END AS phone,
+        row_number() OVER(PARTITION BY u.id ORDER BY d.last_seen DESC,d.id) AS position
+      FROM deployments d JOIN users u ON u.id=d.user_id
+      JOIN verified_numbers v ON v.user_id=u.id AND v.phone=d.verified_phone
+      LEFT JOIN owner o ON o.user_id=u.id LEFT JOIN v3_admins a ON a.user_id=u.id
+      LEFT JOIN portal_profiles p ON p.user_id=u.id LEFT JOIN hidden_admin_numbers h ON h.user_id=u.id
+      WHERE (o.user_id IS NOT NULL OR (a.level BETWEEN 1 AND 7 AND a.suspended=0))
+        AND u.banned=0 AND p.closed_at IS NULL AND d.intent='run' AND d.state='online'
+        AND d.linked=1 AND d.verified_phone=d.phone AND d.last_seen>? AND d.paid_until>?
+    ) SELECT name,rank,phone FROM online WHERE position=1 ORDER BY rank DESC,name COLLATE NOCASE,id`,now-12000,now);
+  }
+  setAdminNumberVisibility(actor,id,visible){
+    return this.tx(()=>{
+      this.v3.permit(actor,'founder');
+      const user=this.requireActive(id);
+      if(typeof visible!=='boolean'||(!user.is_owner&&!this.v3.role(user).level))
+        throw new PortalError(400,'Select a staff member and a visibility setting.');
+      if(visible)this.run('DELETE FROM hidden_admin_numbers WHERE user_id=?',id);
+      else this.run('INSERT OR IGNORE INTO hidden_admin_numbers VALUES (?)',id);
+      this.v3.audit(actor,'admin.number_visibility',id,visible?'Shown':'Hidden');
+    });
   }
   staffAccountData(actorId,search='',id){
     const actor=this.requireActive(actorId);
