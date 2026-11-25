@@ -629,13 +629,31 @@ function clearRetiredSessions(root, database) {
   const {DatabaseSync} = require('node:sqlite');
   const db = new DatabaseSync(database, {readOnly: true});
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  let removed = 0;
+  let removed = 0, temporaryBytes = 0;
+  function discardFile(file, age = 0){
+    const st=fs.lstatSync(file,{throwIfNoEntry:false});
+    if(st?.isFile() && Date.now()-st.mtimeMs>=age){
+      fs.unlinkSync(file);
+      temporaryBytes+=st.size;
+    }
+  }
   try {
     const rows = db.prepare('SELECT id, generation, state FROM deployments').all();
     for (const {id, generation, state} of rows) {
       if (!uuid.test(id) || !uuid.test(generation)) continue;
       const dir = path.join(root, id);
       if (!fs.lstatSync(dir, {throwIfNoEntry: false})?.isDirectory()) continue;
+      const temp = path.join(dir,'tmp');
+      if(fs.lstatSync(temp,{throwIfNoEntry:false})?.isDirectory()){
+        for(const name of fs.readdirSync(temp)){
+          if(/^raymon-\d+-\d+-[a-f0-9]+\.[a-z0-9]+$/i.test(name))discardFile(path.join(temp,name));
+        }
+      }
+      const auth=path.join(dir,'auth-'+generation);
+      if(fs.lstatSync(auth,{throwIfNoEntry:false})?.isDirectory()){
+        discardFile(path.join(auth,'.outgoing-retry.json.tmp'));
+        discardFile(path.join(auth,'.outgoing-retry.json'),15*60000);
+      }
       for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
         if (!entry.isDirectory() || !entry.name.startsWith('auth-')) continue;
         const old = entry.name.slice(5).replace(/\.pre-v7$/, '');
@@ -645,7 +663,7 @@ function clearRetiredSessions(root, database) {
       }
     }
     const disk = fs.statfsSync(root);
-    console.log('Retired session directories removed:', removed, 'Free MiB:', Math.floor(disk.bavail * disk.bsize / 1048576));
+    console.log('Retired session directories removed:', removed, 'Temporary bytes removed:', temporaryBytes, 'Free MiB:', Math.floor(disk.bavail * disk.bsize / 1048576));
   } finally {
     db.close();
   }
