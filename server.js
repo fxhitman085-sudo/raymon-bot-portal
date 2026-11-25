@@ -12,7 +12,7 @@ const kdf={N:32768,r:8,p:3,maxmem:40*1024*1024};
 const dummySalt=randomBytes(16).toString('hex');
 
 const random=()=>randomBytes(32).toString('base64url');
-const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/cc4.js',['cc4.js','text/javascript; charset=utf-8']],['/community-v5-ui.js',['community-v5-ui.js','text/javascript; charset=utf-8']],['/vip-silver.svg',['vip-silver.svg','image/svg+xml']],['/vip-gold.svg',['vip-gold.svg','image/svg+xml']],['/vip-diamond.svg',['vip-diamond.svg','image/svg+xml']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
+const staticFiles=new Map([['/',['index.html','text/html; charset=utf-8']],['/recruitment-ui.js',['recruitment-ui.js','text/javascript; charset=utf-8']],['/app.js',['app.js','text/javascript; charset=utf-8']],['/portal-v3-ui.js',['portal-v3-ui.js','text/javascript; charset=utf-8']],['/vip-ui.js',['vip-ui.js','text/javascript; charset=utf-8']],['/cc4.js',['cc4.js','text/javascript; charset=utf-8']],['/community-v5-ui.js',['community-v5-ui.js','text/javascript; charset=utf-8']],['/vip-silver.svg',['vip-silver.svg','image/svg+xml']],['/vip-gold.svg',['vip-gold.svg','image/svg+xml']],['/vip-diamond.svg',['vip-diamond.svg','image/svg+xml']],['/style.css',['style.css','text/css; charset=utf-8']],['/raymon-brand.jpg',['bot-runtime/assets/announcements.jpg','image/jpeg']]]);
 const equal=(left,right)=>typeof left==='string'&&typeof right==='string'&&Buffer.byteLength(left)===Buffer.byteLength(right)&&timingSafeEqual(Buffer.from(left),Buffer.from(right));
 const cookieValue=(req,name)=>req.headers.cookie?.split(';').map(part=>part.trim()).find(part=>part.startsWith(name+'='))?.slice(name.length+1);
 const json=(res,code,body)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));};
@@ -277,6 +277,12 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
         return json(res,200,{admins:store.onlineAdmins()});
       }
+      if(method==='POST'&&route==='/internal/recruitment'){
+        if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
+        const event=await body(req),d=store.summons.verified(event.deployment);
+        if(!d||d.generation!==event.generation||d.intent!=='run')throw new PortalError(409,'Session changed.');
+        return json(res,200,store.recruitment.receipt(d,event));
+      }
       if(method==='POST'&&route==='/internal/summons'){
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
         const event=await body(req,5*1024*1024);
@@ -295,7 +301,7 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
         const data=await body(req,5*1024*1024);
         if(!Array.isArray(data?.reports)||data.reports.length>store.maxBots)throw new PortalError(400,'Invalid worker reports.');
-        return json(res,200,{deployments:store.sync(data.reports).map(d=>({...d,summons:d.intent==='run'?store.summons.pending(d):[]}))});
+        return json(res,200,{deployments:store.sync(data.reports).map(d=>({...d,recruitment:d.intent==='run'?store.recruitment.mail(d):null,applicationUrl:origin+'/#apply-admin',summons:d.intent==='run'?store.summons.pending(d):[]}))});
       }
       if(method==='GET'&&route.startsWith('/internal/menu/')){
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
@@ -362,6 +368,20 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
+      if(route==='/api/recruitment'){
+        const api=store.recruitment,q=url.searchParams;
+        if(method==='GET'){
+          const value=q.has('settings')?api.settings(user.id):q.has('app')?api.detail(user.id,q.get('app')):q.has('review')?api.list(user.id):api.public(user.id);
+          return json(res,200,value);
+        }
+        if(method==='POST'){
+          rateLimit(req,user.id,'recruitment');
+          const data=await body(req,3*1024*1024);
+          if(!data||typeof data.action!=='string')throw new PortalError(400,'Invalid recruitment action.');
+          if(store.session(session)?.id!==user.id)throw new PortalError(401,'Sign in again.');
+          return json(res,200,data.action==='assist'?await api.assist(user.id,data):api.action(user.id,data,origin));
+        }
+      }
       if(method==='GET'&&route==='/api/my-cases'){
         store.v3.permit(user.id,'tickets.view');
         return json(res,200,{items:store.all('SELECT id,subject,closed FROM v3_tickets WHERE assignee=? ORDER BY closed,updated DESC',user.id)});
@@ -697,6 +717,12 @@ if(require.main===module){
     try{store.v3.settleAutomatic();}catch(error){console.error('Could not process leaderboard prizes:',error.message);}
     try{store.vip.tick();}catch(error){console.error('VIP renewals failed:',error.message);}
   };
+  let grading=false;
+  const gradeTimer=setInterval(async()=>{
+    if(grading||!process.env.GEMINI_API_KEY)return;
+    grading=true;try{await store.recruitment.work();}catch{console.warn('Recruitment grading delayed.');}finally{grading=false;}
+  },3000);
+  gradeTimer.unref();
   const prizeTimer=setInterval(settlePrizes,60_000);
   prizeTimer.unref();
   settlePrizes();
@@ -715,7 +741,7 @@ if(require.main===module){
     const serverClosed=new Promise(resolve=>server.close(resolve));
     await stopWorker?.();
     await stopNotices?.();
-    clearInterval(prizeTimer);
+    clearInterval(prizeTimer);clearInterval(gradeTimer);
     await serverClosed;
     store.db.close();
   }

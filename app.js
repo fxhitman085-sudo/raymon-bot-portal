@@ -137,6 +137,7 @@ function drawSettings(data,bot){
 }
 function draw(data){
   current=data;
+  window.recDashboard?.(data);
   const {user,deployments=[]}=data;
   const d=addingBot?null:(deployments.find(bot=>bot.id===selectedBotId)||deployments[0]||null);
   if(!addingBot)selectedBotId=d?.id;

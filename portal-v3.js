@@ -2,6 +2,7 @@
 const {createHash,randomUUID}=require('node:crypto');
 
 const PERMISSIONS={
+  'recruitment.review':'Review administrator applications',
   'tickets.view':'View the support inbox',
   'tickets.reply':'Reply to tickets',
   'tickets.assign':'Assign tickets',
@@ -260,6 +261,7 @@ class PortalV3 {
       const prior=this.s.get('SELECT level,suspended FROM v3_admins WHERE user_id=?',target.id);
       if(!founder&&prior?.level===7)this.fail(403,'Level 7 administrators cannot manage other Level 7 administrators.');
       if(action==='level'){
+        if(!founder&&!prior&&this.s.get("SELECT 1 FROM rec_app WHERE user_id=? AND status='Accepted'",target.id))this.fail(403,'Only the Founder appoints accepted applicants.');
         if(target.banned||target.closed_at)this.fail(409,'Select an active account.');
         if(!Number.isInteger(level)||level<1||level>(founder?7:6))
           this.fail(403,'You cannot appoint or promote an administrator to this level.');
