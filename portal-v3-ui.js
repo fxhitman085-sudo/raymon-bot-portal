@@ -126,6 +126,14 @@ $('support-inbox-button').addEventListener('click',()=>action($('support-inbox-b
   $('support-dialog').close();
   await openTickets();
 }));
+$('my-cases').onclick=()=>action($('my-cases'),async()=>{
+  const host=ticketContainer(true);
+  host.dataset.ticketRead=crypto.randomUUID();
+  const {items}=await request('/api/my-cases');
+  host.replaceChildren(...items.map(t=>v3Button(t.subject+(t.closed?' · Closed':''),()=>showTicket(true,t.id))));
+  if(!items.length)v3Text(host,'You have no assigned cases.');
+});
+$('all-tickets').onclick=()=>showInbox(true).catch(e=>note(e.message,true));
 bindPanel('staff-inbox-panel',()=>showInbox(true));
 async function openTicketNotice(row){
   if(!row.read)await request('/api/notifications',{id:row.id,action:'read'});
@@ -180,7 +188,9 @@ async function showTicket(staff,id){
   const conversation=element('article',undefined,'panel v3-ticket');
   conversation.append(title,element('p',(ticket.closed?'Closed':'Open')+
     (staff?' · '+ticket.requester:'')+(ticket.assigneeName?' · Assigned to '+ticket.assigneeName:''),'small'));
-  for(const item of ticket.messages){
+  const thread=element('div');
+  conversation.append(thread);
+  const renderMessage=item=>{
     const message=element('article',undefined,'v3-message');
     message.append(element('strong',item.author),element('time',formatDate(item.created),'small'),element('p',item.message));
     if(item.screenshot){
@@ -191,16 +201,35 @@ async function showTicket(staff,id){
       link.append(photo);
       message.append(link);
     }
-    conversation.append(message);
+    thread.append(message);
+  };
+  ticket.messages.forEach(renderMessage);
+  if(staff&&ticket.summons&&!ticket.closed){
+    let count=ticket.messages.length;
+    const poll=async()=>{
+      if(host.dataset.ticketRead!==token||!thread.isConnected)return;
+      try{
+        if(!document.hidden&&thread.getClientRects().length){
+          const latest=await request(v3Path('ticket',ticketParams(staff,{id})));
+          if(host.dataset.ticketRead!==token)return;
+          latest.messages.slice(count).forEach(renderMessage);
+          count=latest.messages.length;
+        }
+      }catch{}
+      setTimeout(poll,5000);
+    };
+    setTimeout(poll,5000);
   }
-  if(!ticket.closed&&(!staff||can('tickets.reply'))){
+  if(staff&&ticket.mine&&ticket.summons&&!ticket.summons.support&&!ticket.closed)
+    conversation.append(v3Button('Switch to RAYMON BOT Support',()=>ticketChange(true,{action:'switch',ticketId:id})));
+  if(!ticket.closed&&(!staff||can('tickets.reply')&&(!ticket.summons||ticket.mine))){
     const form=element('form');
     const text=v3Field(form,'Reply',Object.assign(element('textarea'),{required:true,maxLength:4000,rows:3}));
     const screenshot=v3Field(form,'Screenshot (optional, up to 3 MB)',v3Input('file',{accept:'image/jpeg,image/png,image/webp'}));
     v3Submit(form,'Send reply',async()=>ticketChange(staff,{action:'reply',ticketId:id,message:text.value,screenshot:await screenshotValue(screenshot)}));
     conversation.append(form);
   }
-  if(staff&&!ticket.closed&&can('tickets.assign')){
+  if(staff&&!ticket.summons&&!ticket.closed&&can('tickets.assign')){
     const form=element('form'),select=element('select');
     select.append(new Option('Unassigned',''),...ticket.assignees.map(person=>new Option(person.name,person.id)));
     select.value=ticket.assignee||'';

@@ -277,11 +277,25 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
         return json(res,200,{admins:store.onlineAdmins()});
       }
+      if(method==='POST'&&route==='/internal/summons'){
+        if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
+        const event=await body(req,5*1024*1024);
+        if(event.image)event.image=await ticketScreenshot(event.image);
+        const d=store.summons.verified(event.deployment);
+        if(!d||d.generation!==event.generation||d.intent!=='run')throw new PortalError(409,'Session changed.');
+        if(event.ack)store.run('UPDATE summons_mail SET sent=1 WHERE id=? AND via=?',event.ack,d.phone);
+        else {
+          store.db.exec('SAVEPOINT incoming');
+          try{store.summons.input(d,event);store.db.exec('RELEASE incoming');}
+          catch(error){store.db.exec('ROLLBACK TO incoming; RELEASE incoming');throw error;}
+        }
+        return json(res,200,{ok:true});
+      }
       if(method==='POST'&&route==='/internal/sync'){
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
         const data=await body(req,5*1024*1024);
         if(!Array.isArray(data?.reports)||data.reports.length>store.maxBots)throw new PortalError(400,'Invalid worker reports.');
-        return json(res,200,{deployments:store.sync(data.reports)});
+        return json(res,200,{deployments:store.sync(data.reports).map(d=>({...d,summons:d.intent==='run'?store.summons.pending(d):[]}))});
       }
       if(method==='GET'&&route.startsWith('/internal/menu/')){
         if(!equal(req.headers.authorization,'Bearer '+workerToken))throw new PortalError(403,'Worker access required.');
@@ -348,6 +362,10 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
         return finishAuth(res,session,member,200,data.remember!==false);
       }
       if(!user)throw new PortalError(401,'Sign in to continue.');
+      if(method==='GET'&&route==='/api/my-cases'){
+        store.v3.permit(user.id,'tickets.view');
+        return json(res,200,{items:store.all('SELECT id,subject,closed FROM v3_tickets WHERE assignee=? ORDER BY closed,updated DESC',user.id)});
+      }
       if(route.startsWith('/api/v5/')){
         const api=store.upgrade5;
         if(method==='GET'&&route==='/api/v5/member-avatar'){

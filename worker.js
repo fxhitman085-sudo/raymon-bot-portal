@@ -60,6 +60,9 @@ class Worker {
           if(entry.bot?.portalUpdates&&task.settings)settings.apply(entry.bot,task.settings);
           if(entry.menuRevision!==task.menuRevision&&!entry.menuLoading)this.loadMenu(entry,task.menuRevision??null);
           entry.task=task;
+          if(task.summons?.length&&!entry.mailing&&entry.bot?.connected&&entry.bot.canProcessMessages?.()){
+            entry.mailing=this.deliverSummons(entry).catch(()=>console.warn('Support delivery pending')).finally(()=>{entry.mailing=null;});
+          }
           this.community.run(entry,()=>!this.closed&&this.entries.get(task.id)===entry&&
             entry.verified&&!entry.failure&&entry.bot?.connected&&!entry.bot.socketClosed&&
             this.clock()<Math.min(entry.task.permitUntil,this.authorizedUntil));
@@ -74,6 +77,52 @@ class Worker {
       }
       throw new Error('Portal control connection unavailable');
     }
+  }
+  async supportEvent(entry,event){
+    const response=await this.fetcher(new URL('/internal/summons',this.url),{
+      method:'POST',headers:{Authorization:'Bearer '+this.token,'Content-Type':'application/json'},
+      body:JSON.stringify({deployment:entry.task.id,generation:entry.task.generation,...event}),signal:AbortSignal.timeout(10000)
+    });
+    if(!response.ok)throw Error('Support request could not be processed.');
+  }
+  async deliverSummons(entry){
+    for(const job of entry.task.summons){
+      if(!entry.bot.canProcessMessages()||!entry.bot.connected)return;
+      const jid=job.recipient.slice(1)+'@s.whatsapp.net';
+      await entry.bot.sock.sendMessage(jid,{text:job.body},{messageId:job.id});
+      await this.supportEvent(entry,{ack:job.id});
+    }
+  }
+  async supportMessage(entry,m,sock){
+    const jid=m.key?.remoteJid,own=entry.task.phone;
+    if(!jid||!m.key.id||!/@(s\.whatsapp\.net|lid)$/.test(jid))return false;
+    const norm=j=>String(j||'').replace(/:\d+@/,'@');
+    const self=m.key.fromMe&&[sock.user?.id,sock.user?.lid,own.slice(1)+'@s.whatsapp.net'].some(j=>norm(j)===norm(jid));
+    if(!self&&(own!==require('./community').ADMIN||m.key.fromMe))return false;
+    const msg=m.message||{},content=msg.extendedTextMessage||msg.imageMessage;
+    const quote=content?.contextInfo?.stanzaId;
+    const text=msg.conversation||content?.text||content?.caption||(msg.imageMessage?'Screenshot':'');
+    if(!(self&&/^\.admin\s+help(?:\s|$)/i.test(text))&&!/^52A1[A-F0-9]{24}$/.test(quote||''))return false;
+    let peer=own;
+    if(!self){
+      let pn=[jid,m.key.remoteJidAlt].find(j=>j?.endsWith('@s.whatsapp.net'));
+      if(!pn)pn=await sock.signalRepository?.lidMapping?.getPNForLID?.(jid);
+      if(!pn?.endsWith('@s.whatsapp.net'))return false;
+      peer='+'+norm(pn).split('@')[0];
+    }
+    let image;
+    if(msg.imageMessage){
+      const chunks=[];let size=0;
+      const stream=await require('@whiskeysockets/baileys').downloadContentFromMessage(msg.imageMessage,'image');
+      for await(const chunk of stream){
+        size+=chunk.length;
+        if(size>3*1024*1024)throw Error('Screenshot exceeds 3 MB.');
+        chunks.push(chunk);
+      }
+      image=Buffer.concat(chunks).toString('base64');
+    }
+    await this.supportEvent(entry,{mid:m.key.id,quote,text,peer,image});
+    return true;
   }
   groupSettings(entry,task){
     if(entry.groupRunning||entry.groupResult?.token===task.token||!validId(task.token))return;
@@ -167,6 +216,18 @@ class Worker {
         if(typeof bot[name]!=='function')continue;
         const handle=bot[name].bind(bot);
         bot[name]=async(...args)=>allowed()?handle(...args):undefined;
+      }
+      if(typeof bot.onMessages==='function'){
+        const handle=bot.onMessages.bind(bot);
+        bot.onMessages=async(batch,sock)=>{
+          if(batch?.type!=='notify'||!allowed())return handle(batch,sock);
+          const remaining=[];
+          for(const m of batch.messages){
+            try{if(!await this.supportMessage(entry,m,sock))remaining.push(m);}
+            catch{console.warn('Support event failed');await sock.sendMessage(m.key.remoteJid,{text:'Support could not receive that message. Please retry or open your case in the portal.'}).catch(()=>{});}
+          }
+          if(remaining.length)return handle({...batch,messages:remaining},sock);
+        };
       }
       if(bot.portalUpdates&&task.settings)settings.apply(bot,task.settings);
       bot.onPairCode=async code=>{

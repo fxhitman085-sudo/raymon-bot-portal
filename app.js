@@ -202,7 +202,14 @@ function draw(data){
         draw(current);
         navigateTo('manage-title');
       });
-      card.append(icon,info,manage);
+      const summon=element('button','Summon Admin','subtle');
+      summon.onclick=()=>action(summon,async()=>{
+        const message=window.prompt('What do you need help with?');
+        if(!message?.trim())return;
+        const result=await request('/api/v3/tickets',{action:'create',deployment:bot.id,subject:'Summon Admin',message});
+        note('Admins notified · Case #'+result.caseNumber);
+      });
+      card.append(icon,info,manage,summon);
       cards.append(card);
     }
     if(!deployments.length){

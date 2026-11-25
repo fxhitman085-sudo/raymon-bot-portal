@@ -318,7 +318,7 @@ class PortalV3 {
   }
   ticketView(id,ticketId,staff){
     const {id:ticket,subject,closed,assignee,assigneeName,requester}=this.ticket(id,ticketId,staff);
-    return {id:ticket,subject,closed:!!closed,assignee:staff?assignee:undefined,assigneeName,requester,
+    return {summons:this.s.summons.get(ticket)||null,mine:assignee===id,id:ticket,subject,closed:!!closed,assignee:staff?assignee:undefined,assigneeName,requester,
       assignees:staff&&this.role(this.s.user(id)).permissions.includes('tickets.assign')?this.assignees():[],
       messages:this.s.all(`SELECT m.id,m.message,m.staff,(m.screenshot IS NOT NULL) AS screenshot,m.created,
         CASE WHEN m.staff THEN 'RAYMON BOT Support' ELSE u.name END AS author
@@ -356,16 +356,28 @@ class PortalV3 {
         const ticket=randomUUID();
         this.s.run('INSERT INTO v3_tickets(id,user_id,subject,created,updated) VALUES (?,?,?,?,?)',ticket,id,title,now,now);
         this.s.run('INSERT INTO v3_ticket_messages VALUES (?,?,?,?,?,?,?)',randomUUID(),ticket,id,0,text,screenshot,now);
-        return {id:ticket};
+        if(data.deployment)this.s.summons.opened(ticket,id,data.deployment,text);
+        return {id:ticket,caseNumber:this.s.summons.get(ticket)?.num};
       }
       if(typeof ticketId!=='string')this.fail(400,'Select a ticket.');
       const ticket=this.ticket(id,ticketId,staff);
+      const c=this.s.summons.get(ticketId);
+      if(c&&staff&&(ticket.assignee!==id||action==='assign'))this.fail(403,'Only the admin who accepted this case can manage it.');
+      if(c&&staff&&action==='switch'){
+        this.permit(id,'tickets.reply');
+        if(ticket.closed||c.support||this.s.summons.online(this.s.summons.verified(c.deployment)))this.fail(409,'Switch is available when the linked bot is offline.');
+        this.s.run('UPDATE summons SET support=1 WHERE ticket=?',ticketId);
+        this.s.run("UPDATE summons_mail SET via=? WHERE ticket=? AND kind='chat' AND sent=0",require('./community').ADMIN,ticketId);
+        this.s.summons.contact({...c,support:1},'Hi '+ticket.requester+', it’s '+this.s.user(id).name+' from RAYMON BOT Support. Your bot disconnected, so I’ve moved case #'+c.num+' here. I have our earlier messages. Reply here and we’ll continue where we left off.');
+        return {id:ticketId};
+      }
       if(ticket.closed)this.fail(409,'This ticket is closed.');
       if(action==='reply'){
         if(staff)this.permit(id,'tickets.reply');
         if(this.s.get('SELECT count(*) AS n FROM v3_ticket_messages WHERE ticket_id=?',ticket.id).n>=100)
           this.fail(409,'This ticket has reached its message limit. Open a new ticket if you still need help.');
         this.s.run('INSERT INTO v3_ticket_messages VALUES (?,?,?,?,?,?,?)',randomUUID(),ticket.id,id,Number(staff),text,screenshot,now);
+        if(staff&&c)this.s.summons.contact(c,this.s.user(id).name+' · Case #'+c.num+'\n'+text);
         if(staff)this.ticketNotice(ticket.user_id,ticket.id,false,'New support reply','Read the reply to “'+ticket.subject+'”.');
         else if(ticket.assignee)this.ticketNotice(ticket.assignee,ticket.id,true,'New reply in support inbox','Read the reply to “'+ticket.subject+'”.');
       }else if(action==='assign'&&staff){

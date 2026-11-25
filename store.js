@@ -145,6 +145,7 @@ class Store {
       }
     });
     this.v3=new PortalV3(this,PortalError);
+    this.summons=new (require('./summons').Summons)(this);
     this.vip=new Vip(this,PortalError);
     this.diagnostics=new Diagnostics(this,PortalError);
     this.recovery=new Recovery(this);
@@ -155,6 +156,11 @@ class Store {
   all(sql,...params){return this.db.prepare(sql).all(...params);}
   run(sql,...params){return this.db.prepare(sql).run(...params);}
   tx(fn){
+    if(this.db.isTransaction){
+      this.db.exec('SAVEPOINT nested_store');
+      try{const value=fn();this.db.exec('RELEASE nested_store');return value;}
+      catch(error){this.db.exec('ROLLBACK TO nested_store; RELEASE nested_store');throw error;}
+    }
     this.db.exec('BEGIN IMMEDIATE');
     try{const value=fn();this.db.exec('COMMIT');return value;}
     catch(error){this.db.exec('ROLLBACK');throw error;}

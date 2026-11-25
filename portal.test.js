@@ -1306,3 +1306,26 @@ test('V5 HTTP chat and menu upload endpoints authorize sessions and preserve per
  assert.equal(data.messages.at(-1).name,'Member');
  assert.equal((await get('/internal/menu/'+randomUUID())).status,403);
 });
+
+test('summons binds quoted claims and replies to a single case across a channel switch',t=>{
+  const {store,member,owner,advance}=fixture(t);
+  store.pair(owner,phone);
+  store.pair(member,phone2);
+  const admin=store.deployment(owner),user=store.deployment(member);
+  store.sync([report(admin,'online'),report(user,'online')]);
+  const svc=store.summons;
+  const {id}=svc.create(member,user.id,'My bot disconnected');
+  const offer=svc.pending(admin)[0];
+  assert.ok(offer);
+  const accept={mid:'a',quote:offer.id,text:'.accept',peer:phone};
+  store.tx(()=>svc.input(admin,accept));
+  store.tx(()=>svc.input(admin,accept));
+  assert.equal(store.v3.ticket(owner,id,true).assignee,owner);
+  const confirmation=svc.pending(user)[0];
+  store.tx(()=>svc.input(user,{mid:'b',quote:confirmation.id,text:'It stopped today.',peer:phone2}));
+  assert.equal(store.v3.ticketView(owner,id,true).messages.at(-1).message,'It stopped today.');
+  assert.throws(()=>store.v3.ticketAction(owner,true,{action:'assign',ticketId:id,assignee:null},null));
+  advance(15000);
+  store.v3.ticketAction(owner,true,{action:'switch',ticketId:id},null);
+  assert.equal(svc.get(id).support,1);
+});
