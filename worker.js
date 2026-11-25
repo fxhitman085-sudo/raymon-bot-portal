@@ -60,6 +60,8 @@ class Worker {
           if(entry.bot?.portalUpdates&&task.settings)settings.apply(entry.bot,task.settings);
           if(entry.menuRevision!==task.menuRevision&&!entry.menuLoading)this.loadMenu(entry,task.menuRevision??null);
           entry.task=task;
+          if(task.recruitment&&!entry.recruiting&&entry.bot?.connected&&entry.bot.canProcessMessages?.())
+            entry.recruiting=this.recruitNotice(entry,task).catch(()=>console.warn('Recruitment notification pending')).finally(()=>{entry.recruiting=null;});
           if(task.summons?.length&&!entry.mailing&&entry.bot?.connected&&entry.bot.canProcessMessages?.()){
             entry.mailing=this.deliverSummons(entry).catch(()=>console.warn('Support delivery pending')).finally(()=>{entry.mailing=null;});
           }
@@ -77,6 +79,25 @@ class Worker {
       }
       throw new Error('Portal control connection unavailable');
     }
+  }
+  async recruitNotice(entry,task){
+    const {id,round}=task.recruitment;
+    const receipt=async state=>{
+      const res=await this.fetcher(new URL('/internal/recruitment',this.url),{method:'POST',headers:{Authorization:'Bearer '+this.token,'Content-Type':'application/json'},body:JSON.stringify({deployment:task.id,generation:task.generation,id,state}),signal:AbortSignal.timeout(5000)});
+      if(!res.ok)throw Error('Recruitment acknowledgment unavailable');
+      return (await res.json()).ok;
+    };
+    const bot=entry.bot;
+    if(!bot.portalUpdates?.preference())return receipt('Opted out');
+    if(!await receipt('claim'))return;
+    let image;
+    try{image=await fs.readFile(path.join(__dirname,'bot-runtime/assets/announcements.jpg'));}catch{return receipt('Failed');}
+    if(!bot.canProcessMessages()||!bot.connected)return receipt('Failed');
+    if(!bot.portalUpdates.preference())return receipt('Opted out');
+    try{
+      await bot.sock.sendMessage(task.phone.slice(1)+'@s.whatsapp.net',{image,caption:'RAYMON BOT admin recruitment is open. Apply for round '+round+' through Community → Apply for Admin. '+task.applicationUrl},{messageId:id.replaceAll('-','').toUpperCase()});
+    }catch(error){return receipt(error?.output?.statusCode===429?'Failed':'Unconfirmed');}
+    await receipt('Sent');
   }
   async supportEvent(entry,event){
     const response=await this.fetcher(new URL('/internal/summons',this.url),{

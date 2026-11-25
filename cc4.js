@@ -7,6 +7,7 @@ const cc4Pages=[
   ['finance','Finance','wallet','Financial Center','Payments, packages and approved revenue'],
   ['vip','VIP','crown','VIP Management','Memberships and plan administration'],
   ['releases','Beta & Releases','flask-conical','Beta Testing & Global Launch','Test upcoming features, select VIP tiers and launch globally'],
+  ['recruitment','Admin Recruitment','shield-check','Admin Recruitment','Applications and recruitment rounds'],
   ['support','Support','headset','Support Center','Customer requests and priority tickets'],
   ['chat','Community Chat','messages-square','Community Moderation','Reported messages and chat moderation'],
   ['staff','Staff','shield-check','Staff Directory','Appointments and staff management'],
@@ -201,6 +202,7 @@ function cc4Allowed(key,user){
     case 'finance':return false;
     case 'vip':return any('vip.view','vip.plans','vip.grant');
     case 'releases':return false;
+    case 'recruitment':return any('recruitment.review');
     case 'support':return any('tickets.view');
     case 'chat':return any('users.moderate');
     case 'staff':return any('staff.manage.lower');
@@ -236,6 +238,7 @@ function cc4Show(page,fetchData=true){
   }
   $('cc4-section-title').textContent=meta[3];
   $('cc4-section-subtitle').textContent=meta[4];
+  if(fetchData&&page==='recruitment')window.recStaff?.().catch(e=>note(e.message,true));
   if(fetchData&&page==='chat'&&typeof v5LoadModeration==='function')v5LoadModeration().catch(e=>note(e.message,true));
   if(fetchData&&page==='releases'&&typeof v5LoadReleases==='function')v5LoadReleases().catch(e=>note(e.message,true));
   if(fetchData&&page==='overview')cc4LoadOverview().catch(e=>note(e.message,true));

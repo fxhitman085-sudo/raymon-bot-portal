@@ -12,6 +12,7 @@
   <script src="/vip-ui.js" defer></script>
   <script src="/cc4.js" defer></script>
   <script src="/community-v5-ui.js" defer></script>
+  <script src="/recruitment-ui.js" defer></script>
 </head>
 <body>
   <header class="top"><div class="shell nav">
@@ -128,7 +129,7 @@
           <button class="button primary" type="submit">Save password</button>
         </form>
       </article>
-      <section id="home-view">
+      <section id="home-view"><button type="button" id="rec-ticker" hidden aria-label="Apply for Admin"></button>
         <div class="dashboard-welcome">
           <h1 id="home-heading" tabindex="-1">Welcome Back</h1>
           <p class="muted">Manage your bots, monitor activity, and control your hosting experience.</p>
@@ -297,6 +298,7 @@
         <div class="page-heading"><h1 id="community-heading" tabindex="-1">Community</h1></div>
         <div class="actions community-links"><a class="button primary" id="community-link" target="_blank" rel="noopener noreferrer" hidden>Join the community</a><a href="https://wa.me/message/264FM6MC5QN3G1" target="_blank" rel="noopener noreferrer" id="community-support" class="button subtle">Support</a></div>
 
+        <button type="button" id="rec-apply" class="button primary">Apply for Admin</button><section id="rec-form" class="panel" hidden></section>
         <article class="panel" id="v5-beta-panel" hidden>
           <h2>My Beta Tests</h2>
           <p class="small muted">You can send feedback on upcoming changes shared with your account or VIP membership.</p>
