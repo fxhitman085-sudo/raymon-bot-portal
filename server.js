@@ -221,7 +221,8 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
     }
     const forwarded=String(req.headers['x-real-ip']||'').trim();
     const ip=railwayProxy&&isIP(forwarded)?forwarded:req.socket.remoteAddress;
-    for(const [key,limit] of [['ip:'+ip,30],[action+':'+email,action==='forgot-password'?4:8]]){
+    const buckets=action==='recruitment-staff' ? [[action+':'+email,600]] : [['ip:'+ip,30],[action+':'+email,action==='forgot-password'?4:8]];
+    for(const [key,limit] of buckets){
       let entry=attempts.get(key);
       if(!entry||entry.until<=now){
         if(attempts.size>=10_000)throw new PortalError(429,'Too many requests. Try again later.');
@@ -375,9 +376,11 @@ function createServer({store,origin,workerToken,railwayProxy=false,sendMail=null
           return json(res,200,value);
         }
         if(method==='POST'){
-          rateLimit(req,user.id,'recruitment');
+          const staff=store.v3.role(user).permissions.includes('recruitment.review');
+          if(!staff)rateLimit(req,user.id,'recruitment');
           const data=await body(req,3*1024*1024);
           if(!data||typeof data.action!=='string')throw new PortalError(400,'Invalid recruitment action.');
+          if(staff)rateLimit(req,user.id,['submit','assist'].includes(data.action)?'recruitment':'recruitment-staff');
           if(store.session(session)?.id!==user.id)throw new PortalError(401,'Sign in again.');
           return json(res,200,data.action==='assist'?await api.assist(user.id,data):api.action(user.id,data,origin));
         }

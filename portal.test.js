@@ -1340,7 +1340,7 @@ test('recruitment snapshots, totals, permissions, failover and notifications',as
   store.pair(member,phone);const d=store.deployment(member);store.sync([report(d,'online')]);
   const config={...initial.config,count:200,ids:[]};
   run(owner,'preview',{config});assert.equal(new Set(rec.settings(owner).preview.map(q=>q.id)).size,200);
-  run(owner,'preview',{config:{...config,count:5}});
+  run(owner,'preview',{config:{...config,count:5,ids:bank.filter(q=>!q.options).slice(0,5).map(q=>q.id)}});
   run(owner,'open');run(owner,'open');
   assert.equal(store.announcements().length,1);assert.ok(store.dashboard(store.user(member)).recruitment);
   const pub=rec.public(member),q=pub.questions[0];assert.equal(q.rubric,undefined);
@@ -1368,4 +1368,23 @@ test('recruitment snapshots, totals, permissions, failover and notifications',as
   run(owner,'close');assert.equal(store.dashboard(store.user(member)).recruitment,null);
   run(owner,'preview',{config:{...config,count:3,mode:'Always Open'}});run(owner,'activate');
   assert.equal(store.announcements().length,2);
+});
+
+test('one click grades only frozen keyed answers, with no AI and no decision',async t=>{
+ const {store,owner,member}=fixture(t),rec=store.recruitment;
+ const run=(id,action,data={})=>rec.action(id,{action,...data},'https://portal.example');
+ const {config,bank}=rec.settings(owner),keys=bank.filter(q=>q.options).slice(0,2);
+ const ids=[...keys.map(q=>q.id),bank[0].id];
+ run(owner,'preview',{config:{...config,ids,count:ids.length}});
+ run(owner,'open');
+ const form=rec.public(member);
+ assert.equal(form.questions[0].correct,undefined);
+ const answers=Object.fromEntries(form.questions.map((q,i)=>[q.id,{text:i===0?q.options[keys[i].correct]:i===1?q.options[(keys[i].correct+1)%q.options.length]:'My weekly schedule.'}]));
+ const {id}=run(member,'submit',{round:form.round,answers});
+ await rec.work(()=>assert.fail('Keyed rounds must not call Gemini'));
+ assert.throws(()=>run(member,'gradeKey',{app:id}));
+ assert.equal(run(owner,'gradeKey',{app:id}).changed,2);
+ assert.equal(run(owner,'gradeKey',{app:id}).changed,0);
+ const a=rec.detail(owner,id);
+ assert.equal(a.score,50);assert.equal(a.status,'Pending');assert.equal(a.answers[2].result,null);
 });

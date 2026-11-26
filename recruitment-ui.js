@@ -22,9 +22,9 @@ async function applyPage(){
  const inputs=[];
  for(const q of data.questions){
  const group=make('fieldset');form.append(group);group.append(make('legend',q.category+' · '+q.difficulty));
- const input=field(group,q.prompt,'textarea');input.maxLength=3000;
+ const input=q.options?select(group,q.prompt,['',...q.options],''):field(group,q.prompt,'textarea');if(!q.options)input.maxLength=3000;
  const disclosure=field(group,'I used AI assistance on this answer','checkbox');
- button(group,'Edit my draft with Gemini',async()=>{const result=await api('',{action:'assist',round:data.round,qid:q.id,text:input.value});input.value=result.text;disclosure.checked=true;});
+ if(!q.options)button(group,'Edit my draft with Gemini',async()=>{const result=await api('',{action:'assist',round:data.round,qid:q.id,text:input.value});input.value=result.text;disclosure.checked=true;});
  inputs.push({q,input,disclosure});}
  button(form,'Submit application',async()=>{
  const answers={};for(const {q,input,disclosure} of inputs){if(!input.value.trim()){input.focus();throw Error('Answer each question before submitting.');}answers[q.id]={text:input.value,disclosed:disclosure.checked};}
@@ -58,6 +58,11 @@ async function settings(host){
  const picks=section(round,'Choose specific questions');picks.append(make('p','Unfilled places are drawn randomly from the selected categories and difficulty.'));
  button(picks,'Clear manual picks for a random draw',()=>{for(const [,input] of checks)input.checked=false;});
  const checks=state.bank.filter(q=>q.enabled).map(q=>[q.id,field(picks,q.id+' · '+q.prompt,'checkbox',cfg.ids.includes(q.id))]);
+ button(round,'Use ready-made answer-key questions',()=>{
+ const ids=state.bank.filter(q=>q.enabled&&q.options).map(q=>q.id);
+ for(const [id,input] of checks)input.checked=ids.includes(id);
+ count.value=ids.length;diff.value='Any';for(const x of cats)x.enabled.checked=true;
+ });
  const name=field(round,'Save configuration under a name (optional)','text');
  function config(){return {mode:mode.value,count:+count.value,limit:+limit.value,cooldown:+cool.value,ticker:ticker.value,speed:+speed.value,minimum:+min.value,difficulty:diff.value,
  categories:cats.filter(x=>x.enabled.checked).map(x=>x.c),weights:Object.fromEntries(cats.filter(x=>x.weight.value).map(x=>[x.c,+x.weight.value])),ids:checks.filter(x=>x[1].checked).map(x=>x[0])};}
@@ -70,18 +75,27 @@ async function settings(host){
  const edit=section(host,'Question Bank · '+state.bank.length),pick=select(edit,'Question',['Add a new question',...state.bank.map(q=>q.id+' · '+q.prompt)]);
  const prompt=field(edit,'Question','textarea'),cat=select(edit,'Category',state.categories),difficulty=select(edit,'Difficulty',['Basic','Intermediate','Advanced']);
  const criteria=field(edit,'Expected answer criteria','textarea'),rubric=field(edit,'Grading rubric','textarea'),enabled=field(edit,'Enabled','checkbox',true);
- pick.onchange=()=>{const q=state.bank[pick.selectedIndex-1];prompt.value=q?.prompt||'';cat.value=q?.category||state.categories[0];difficulty.value=q?.difficulty||'Basic';criteria.value=q?.criteria||'';rubric.value=q?.rubric||'';enabled.checked=q?.enabled??true;};
- button(edit,'Save question version',async()=>{await post('question',{question:{id:state.bank[pick.selectedIndex-1]?.id,prompt:prompt.value,category:cat.value,difficulty:difficulty.value,criteria:criteria.value,rubric:rubric.value,enabled:enabled.checked}});await window.recStaff();});
+ const options=field(edit,'Answer choices (one per line, leave empty for written answers)','textarea');
+ const correct=field(edit,'Correct choice number (1 is the first choice)','number');
+ pick.onchange=()=>{const q=state.bank[pick.selectedIndex-1];options.value=(q?.options||[]).join('\n');correct.value=q?.options?q.correct+1:'';prompt.value=q?.prompt||'';cat.value=q?.category||state.categories[0];difficulty.value=q?.difficulty||'Basic';criteria.value=q?.criteria||'';rubric.value=q?.rubric||'';enabled.checked=q?.enabled??true;};
+ button(edit,'Save question version',async()=>{await post('question',{question:{id:state.bank[pick.selectedIndex-1]?.id,prompt:prompt.value,category:cat.value,difficulty:difficulty.value,criteria:criteria.value,rubric:rubric.value,enabled:enabled.checked,options:options.value.split('\n').map(s=>s.trim()).filter(Boolean),correct:Number(correct.value)-1}});await window.recStaff();});
  const history=section(host,'Recruitment history & deliveries');
  for(const r of state.history)history.append(make('p','Round '+r.id+' · '+(r.closed?'Closed':'Open')+' · '+r.applications+' applications'));
  for(const d of state.delivery)history.append(make('p','Round '+d.round+' · '+d.state+' · '+d.recipients+' recipients · '+d.attempts+' attempts'));
 }
 async function detail(host,id){
- const a=await api('?app='+encodeURIComponent(id));host.replaceChildren(make('h3',a.account.name+' · '+a.status),make('p',a.account.email+' · '+a.id),make('p','Overall '+(a.score??'Not Yet Graded')+' · '+a.graded+'/'+a.answers.length+' graded · Recommended minimum '+a.policy.minimum));
+ const a=await api('?app='+encodeURIComponent(id));host.replaceChildren(make('h3',a.account.name+' · '+a.status),make('p',a.account.email+' · '+a.id),make('p','Overall '+(a.score??'Not Yet Graded')+' · '+a.graded+'/'+(a.policy.keyedIds?.length||a.answers.length)+' graded · Recommended minimum '+a.policy.minimum));
  for(const [c,m] of Object.entries(a.categories))host.append(make('p',c+' · '+m.toFixed(1)+'/100'));
+ const keys=a.answers.filter(x=>x.question.options);
+ button(host,'Grade application',async()=>{
+   const r=await post('gradeKey',{app:id});await detail(host,id);
+   note(r.count?r.changed+' newly graded · '+r.count+' keyed questions':'This round contains written answers only. Existing scores are preserved.');
+ });
+ if(keys.length)host.append(make('p',keys.length+' keyed questions count toward the score. Written responses are interview context.'));
  const update=async(type,data)=>{await post(type,{app:id,...data});await detail(host,id);};
  for(const x of a.answers){const g=section(host,x.question.prompt);g.append(make('p',x.answer),make('p',x.evidence),make('p',x.result?x.result.source+' · '+x.result.score+'/100 · '+x.result.grade:'Not Yet Graded'),make('p','Rubric · '+x.question.rubric));
  if(x.result)for(const k of ['strengths','weaknesses','reason','improvement'])if(x.result[k])g.append(make('p',k+' · '+x.result[k]));
+ if(a.policy.keyedIds?.length)continue;
  const score=field(g,'Manual score','number',x.result?.score),reason=field(g,'Reason for correction','textarea');
  button(g,'Save manual assessment',()=>update('grade',{qid:x.qid,score:score.value.trim()?Number(score.value):null,detail:reason.value}));
  button(g,'Request fresh AI assessment',()=>update('retry',{qid:x.qid}));}
