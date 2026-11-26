@@ -901,7 +901,7 @@ $('claim-daily').addEventListener('click',()=>action($('claim-daily'),async()=>{
   draw(data);
   note('Daily bonus claimed. '+data.claimedAmount+' coins added.');
 }));
-const rewardFields=[['daily-enabled','dailyEnabled'],['daily-amount','dailyAmount'],
+const rewardFields=[['starter-amount','starterAmount'],['daily-enabled','dailyEnabled'],['daily-amount','dailyAmount'],
   ['referral-enabled','referralEnabled'],['inviter-amount','inviterAmount'],['invitee-amount','inviteeAmount'],
   ['referral-trigger','referralTrigger']];
 function renderRewardSettings({settings,daily,referrals}){
