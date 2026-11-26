@@ -196,7 +196,7 @@ async function loadVipStaff(){
     const identity=element('div',undefined,'vip-identity');
     identity.append(element('strong',member.name+' · '+vipLabel(member.tier)+' VIP'),vipBadge(member.tier));
     item.append(identity,element('p',member.email+' · User ID '+member.id,'small'),element('p','Expires '+vipStamp(member.expiry),'small'));
-    if(can('vip.grant'))item.append(v3Button('Revoke VIP',async()=>{
+    if(can('vip.grant')&&(!member.founder||current.user.isOwner))item.append(v3Button('Revoke VIP',async()=>{
       if(!window.confirm('Revoke this VIP membership immediately?'))return;
       await request('/api/vip',{action:'revoke',userId:member.id});
       await loadVipStaff();note('VIP revoked.');

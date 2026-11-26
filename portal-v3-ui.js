@@ -484,7 +484,7 @@ bindPanel('staff-recovery-panel',loadRecoveryApprovals);
 let editLevel=1;
 function levelSelect(value){
   const select=element('select');
-  for(let level=1;level<=(current?.user?.isOwner?7:6);level++)select.append(new Option('Adm Lvl '+level,String(level)));
+  for(let level=1;level<=(current?.user?.isOwner?7:6);level++)select.append(new Option('Adm Lvl '+level+(level===6?' · Deputy Chief Admin':''),String(level)));
   select.value=String(value);
   return select;
 }
