@@ -736,3 +736,19 @@ button[aria-busy="true"]::after {
 .rec-block label:has(input[type=checkbox]),#rec-form label:has(input[type=checkbox]){display:flex;align-items:center;gap:.6rem}
 .rec-block textarea,#rec-form textarea{min-height:5rem;width:100%}
 @media(prefers-reduced-motion:reduce){.rec-track{transform:none!important;width:auto}.rec-track>span{white-space:normal;min-width:0}.rec-track>span+span{display:none}}
+
+#landing-hero {
+  padding: clamp(70px, 12vw, 145px) 12px 32px;
+}
+#landing-hero::before {
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, var(--bg) 98%),
+              url("/portal-hero.jpg") center 40% / cover no-repeat;
+  mask-image: linear-gradient(to right, transparent, black 10% 90%, transparent);
+}
+.auth-artwork {
+  height: clamp(64px, 10svh, 100px);
+  margin: 6px 0 12px;
+  background: url("/portal-hero.jpg") center 40% / cover no-repeat;
+  mask-image: radial-gradient(ellipse closest-side, black 60%, transparent);
+}
