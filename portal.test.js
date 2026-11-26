@@ -1406,23 +1406,15 @@ test('Founder controls the starter grant for future signups',t=>{
   assert.equal(store.get('SELECT COUNT(*) AS count FROM ledger WHERE user_id=?',third.id).count,0);
 });
 
-test('sound sticker pilot accepts normalized self-chat aliases only on the pilot session', async () => {
+test('sound sticker uses ordinary media-command permissions and requires a quoted video', async () => {
   const {createSoundSticker}=require('./soundsticker');
-  const pilot='15550001111';
-  const command=createSoundSticker({quotedMedia:()=>null},pilot);
-  const ctx={
-    config:{ownerNumber:pilot},
-    db:new Map(),
-    isGroup:false,
-    jid:'700000@lid',
-    sock:{user:{id:pilot+':4@s.whatsapp.net',lid:'700000:4@lid'}},
-    message:{key:{fromMe:true}}
-  };
-  assert.match((await command.execute(ctx)).message,/Reply to a regular video/);
-  assert.match((await command.execute({...ctx,jid:'800000@lid',
-    message:{key:{fromMe:true,remoteJidAlt:pilot+'@s.whatsapp.net'}}})).message,/Reply to a regular video/);
-  for(const change of [{isGroup:true},{jid:'800000@lid'},{config:{ownerNumber:'15550002222'}},
-    {message:{key:{fromMe:false}}}]){
-    assert.match((await command.execute({...ctx,...change})).message,/available in Message yourself/);
+  const command=createSoundSticker({quotedMedia:()=>null});
+  assert.equal(command.name,'soundsticker');
+  assert.equal(command.ownerOnly,undefined);
+  assert.equal(command.allowPrivate,undefined);
+  for(const isGroup of [false,true]){
+    const result=await command.execute({db:new Map(),isGroup,message:{key:{fromMe:false}}});
+    assert.equal(result.ok,false);
+    assert.match(result.message,/Reply to a regular video/);
   }
 });
