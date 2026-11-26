@@ -34,7 +34,7 @@
         <p class="intro">Deploy, customize, and manage powerful WhatsApp bots through one intelligent hosting platform.</p>
         <div class="hero-actions"><button id="deploy-cta" class="button primary" type="button">Get Started Free</button>
           <button id="hero-login" class="button subtle" type="button">Login Here</button></div>
-        <p class="landing-price">Start with 10 free coins. Hosting costs 10 coins per bot every 24 hours.</p>
+        <p class="landing-price">Hosting costs 10 coins per bot every 24 hours.</p>
       </div>
       <div id="account" class="feature auth-card" hidden>
         <a href="#" id="auth-back" class="button quiet">Back to home</a>
@@ -392,6 +392,9 @@
           <form id="rewards-form">
             <fieldset><legend>Daily Bonus</legend>
               <label class="reward-toggle"><input id="daily-enabled" type="checkbox"> Enable daily bonus</label>
+              <label for="starter-amount">Starter coins for new accounts</label>
+              <input id="starter-amount" type="number" min="0" max="100000" step="1" aria-describedby="starter-amount-help" required>
+              <p id="starter-amount-help" class="small">Applies at signup. Set to 0 to disable the grant.</p>
               <label for="daily-amount">Coins per daily claim</label><input id="daily-amount" type="number" min="0" max="100000" step="1" required>
               <p id="owner-daily-stats" class="small"></p>
             </fieldset>

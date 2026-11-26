@@ -1388,3 +1388,20 @@ test('one click grades only frozen keyed answers, with no AI and no decision',as
  const a=rec.detail(owner,id);
  assert.equal(a.score,50);assert.equal(a.status,'Pending');assert.equal(a.answers[2].result,null);
 });
+
+test('Founder controls the starter grant for future signups',t=>{
+  const {store,owner,member}=fixture(t);
+  const settings={...store.rewardConfig(),dailyEnabled:true,referralEnabled:true};
+  assert.equal(settings.starterAmount,10);
+  assert.equal(store.user(member).coins,10);
+  assert.throws(()=>store.updateRewardConfig(member,{...settings,starterAmount:25}),{status:403});
+  assert.throws(()=>store.updateRewardConfig(owner,{...settings,starterAmount:-1}),{status:400});
+  store.updateRewardConfig(owner,{...settings,starterAmount:25});
+  const second=store.register({email:'second@gmail.com',name:'Second',digest:'test'});
+  assert.equal(second.coins,25);
+  assert.equal(store.user(member).coins,10);
+  store.updateRewardConfig(owner,{...settings,starterAmount:0});
+  const third=store.register({email:'third@gmail.com',name:'Third',digest:'test'});
+  assert.equal(third.coins,0);
+  assert.equal(store.get('SELECT COUNT(*) AS count FROM ledger WHERE user_id=?',third.id).count,0);
+});

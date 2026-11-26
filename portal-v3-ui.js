@@ -609,7 +609,7 @@ bindPanel('founder-audit-panel',loadStaff);
 
 const guide=[
   ['Create your account','Use your email address and password to register. Your portal account manages your balances and deployed bots.'],
-  ['Your welcome coins','New accounts start with 10 coins. Each running bot costs 10 coins for 24 hours. Check your balance and daily bonus from the dashboard.','View my coins','wallet'],
+  ['Your coin balance','Each running bot costs 10 coins for 24 hours. Check your balance and daily bonus from the dashboard.','View my coins','wallet'],
   ['Link WhatsApp','Choose Deploy Bot and enter your WhatsApp number. When the portal shows a pairing code, open WhatsApp → Linked devices → Link a device → Link with phone number and enter that code.','Go to deployment','deploy'],
   ['Check your deployment','Once WhatsApp connects, your bot appears in My Bots. From there you can view its status, adjust settings, pause it, or reconnect it.','View my bots','bots'],
   ['Use your dashboard','Check your bot status and renewal, claim your daily bonus, copy your referral link, or open a support ticket from the menu.','View dashboard','home']

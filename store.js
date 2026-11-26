@@ -131,7 +131,7 @@ class Store {
       referral_enabled INTEGER NOT NULL, inviter_amount INTEGER NOT NULL,
       invitee_amount INTEGER NOT NULL, referral_trigger TEXT NOT NULL
     );
-    INSERT OR IGNORE INTO portal_rewards VALUES (1,1,2,1,5,5,'online');
+    INSERT OR IGNORE INTO portal_rewards (singleton,daily_enabled,daily_amount,referral_enabled,inviter_amount,invitee_amount,referral_trigger) VALUES (1,1,2,1,5,5,'online');
     CREATE TABLE IF NOT EXISTS portal_referral_rewards (
       invitee TEXT PRIMARY KEY REFERENCES users(id), inviter TEXT NOT NULL REFERENCES users(id),
       inviter_amount INTEGER NOT NULL, invitee_amount INTEGER NOT NULL, trigger TEXT NOT NULL,
@@ -140,6 +140,9 @@ class Store {
     CREATE INDEX IF NOT EXISTS portal_referral_rewards_inviter ON portal_referral_rewards(inviter);
     `);
     this.tx(()=>{
+      if(!this.all('PRAGMA table_info(portal_rewards)').some(column=>column.name==='starter_amount')){
+        this.run('ALTER TABLE portal_rewards ADD COLUMN starter_amount INTEGER NOT NULL DEFAULT 10 CHECK(starter_amount BETWEEN 0 AND 100000)');
+      }
       for(const user of this.all('SELECT id FROM users WHERE id NOT IN (SELECT user_id FROM portal_profiles)')){
         this.createProfile(user.id);
       }
@@ -227,12 +230,13 @@ class Store {
         throw new PortalError(409,'This account already exists. Sign in or use your existing session to set a password.');
       const id=randomUUID();
       this.run('INSERT INTO users(id,email,name,created) VALUES (?,?,?,?)',id,email,name,this.clock());
-      this.credit(id,10,'starter','One-time starter coins',null,'starter:'+id);
+      const {starterAmount}=this.rewardConfig();
+      if(starterAmount>0)this.credit(id,starterAmount,'starter','One-time starter coins',null,'starter:'+id);
       this.run('INSERT INTO passwords VALUES (?,?,?)',email,id,digest);
       this.createProfile(id,username,referral);
       this.recordReferral(id);
       this.v3.saveOnboarding(id,0);
-      this.event(id,null,'Welcome to RAYMON BOT','Your account received 10 starter coins. Deploy a bot to get started.');
+      this.event(id,null,'Welcome to RAYMON BOT',starterAmount>0?`Your account received ${starterAmount} starter ${starterAmount===1?'coin':'coins'}. Deploy a bot to get started.`:'Deploy a bot to get started.');
       return this.user(id);
     });
   }
@@ -257,18 +261,19 @@ class Store {
   rewardConfig(){
     return this.get(`SELECT daily_enabled AS dailyEnabled,daily_amount AS dailyAmount,
       referral_enabled AS referralEnabled,inviter_amount AS inviterAmount,invitee_amount AS inviteeAmount,
-      referral_trigger AS referralTrigger FROM portal_rewards WHERE singleton=1`);
+      referral_trigger AS referralTrigger,starter_amount AS starterAmount FROM portal_rewards WHERE singleton=1`);
   }
   updateRewardConfig(id,data){
     return this.tx(()=>{
       if(!this.requireActive(id).is_owner)throw new PortalError(403,'Owner access required.');
-      const {dailyEnabled,dailyAmount,referralEnabled,inviterAmount,inviteeAmount,referralTrigger}=data||{};
+      const {dailyEnabled,dailyAmount,referralEnabled,inviterAmount,inviteeAmount,referralTrigger,
+        starterAmount=this.rewardConfig().starterAmount}=data||{};
       if(typeof dailyEnabled!=='boolean'||typeof referralEnabled!=='boolean'||
-        ![dailyAmount,inviterAmount,inviteeAmount].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=100_000)||
+        ![dailyAmount,inviterAmount,inviteeAmount,starterAmount].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=100_000)||
         dailyEnabled&&dailyAmount===0||referralEnabled&&inviterAmount+inviteeAmount===0||
         !['online','signup'].includes(referralTrigger))throw new PortalError(400,'Check the reward amounts and payout settings.');
-      this.run('UPDATE portal_rewards SET daily_enabled=?,daily_amount=?,referral_enabled=?,inviter_amount=?,invitee_amount=?,referral_trigger=? WHERE singleton=1',
-        Number(dailyEnabled),dailyAmount,Number(referralEnabled),inviterAmount,inviteeAmount,referralTrigger);
+      this.run('UPDATE portal_rewards SET daily_enabled=?,daily_amount=?,referral_enabled=?,inviter_amount=?,invitee_amount=?,referral_trigger=?,starter_amount=? WHERE singleton=1',
+        Number(dailyEnabled),dailyAmount,Number(referralEnabled),inviterAmount,inviteeAmount,referralTrigger,starterAmount);
     });
   }
   dailyBonus(id,now=this.clock(),settings=this.rewardConfig()){
