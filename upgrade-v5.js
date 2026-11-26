@@ -92,7 +92,7 @@ class UpgradeV5 {
   const u=this.s.user(id);if(!u||u.banned||u.closed_at)return {role:null,vip:null};
   const staff=this.s.v3.role(u);
   const level=staff.suspended?null:staff.level;
-  const role=u.is_owner?'FOUNDER':level===7?'CHIEF ADMIN':level>=5?'SENIOR ADMIN':level>=1?'ADMIN':null;
+  const role=u.is_owner?'FOUNDER':level===7?'CHIEF ADMIN':level===6?'DEPUTY CHIEF ADMIN':level===5?'SENIOR ADMIN':level>=1?'ADMIN':null;
   return {role,vip:this.s.vip.membership(id)?.tier||null};
  }
  release(feature){this.seed();return this.s.get("SELECT * FROM v5_releases WHERE feature=? AND state IN ('beta','global') ORDER BY updated DESC LIMIT 1",feature);}

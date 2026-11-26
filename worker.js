@@ -329,7 +329,7 @@ async function createRuntimeBot({dir,authDir,phone,id}){
       try{
         const members=await ctx.sessions.onlineAdmins();
         const lines=members.map(({name,rank,phone},i)=>{
-          const role=rank===8?'Founder':'[Level '+rank+'] '+(rank===7?'Chief Admin':rank>=5?'Senior Admin':'Admin');
+          const role=rank===8?'Founder':'[Level '+rank+'] '+(rank===7?'Chief Admin':rank===6?'Deputy Chief Admin':rank===5?'Senior Admin':'Admin');
           return (i+1)+'. '+name.replace(/[\r\n]+/g,' ')+' → '+role+(phone?' · '+phone:'');
         });
         return {ok:true,message:lines.length?'⚡ RAYMON BOT · Online Admins\n\n'+lines.join('\n'):'No admins are online right now.'};

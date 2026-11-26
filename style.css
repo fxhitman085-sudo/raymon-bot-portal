@@ -678,6 +678,7 @@ button[aria-busy="true"]::after {
 .v5-role-FOUNDER{color:#f8d27e;border-color:#bc8834;background:linear-gradient(120deg,#221608,#4a3110,#181008);}
 .v5-role-ADMIN{color:#a7c9ff;border-color:#397fe2;background:#112a52;}
 .v5-role-SENIOR-ADMIN{color:#dac1ff;border-color:#9362da;background:#291b42;}
+.v5-role-DEPUTY-CHIEF-ADMIN{color:#dbe5ff;border-color:#7899ed;background:#1c3059;}
 .v5-role-CHIEF-ADMIN{color:#c5f5ff;border-color:#40b5e0;background:#0b334a;}
 .v5-chat-vip{width:70px;height:21px;object-fit:contain;display:inline-block;vertical-align:middle;}
 .v5-chat-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px;}

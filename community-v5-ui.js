@@ -29,7 +29,7 @@ function v5ChatBadge(row){
 }
 function memberBadges(row){
  const group=element('span',undefined,'member-badges');
- const allowed=['FOUNDER','ADMIN','SENIOR ADMIN','CHIEF ADMIN'];
+ const allowed=['FOUNDER','ADMIN','SENIOR ADMIN','DEPUTY CHIEF ADMIN','CHIEF ADMIN'];
  if(allowed.includes(row.role)){
   const badge=element('span',row.role,'v5-staff-badge v5-role-'+row.role.replaceAll(' ','-'));
   badge.setAttribute('aria-label',row.role);

@@ -855,7 +855,7 @@ function renderProfile(user){
   let badges=$('profile-member-badges');
   if(!badges){badges=element('span');badges.id='profile-member-badges';$('profile-heading').after(badges);}
   const level=user.staff?.suspended?0:user.staff?.level;
-  const role=user.isOwner?'FOUNDER':level===7?'CHIEF ADMIN':level>=5?'SENIOR ADMIN':level>=1?'ADMIN':null;
+  const role=user.isOwner?'FOUNDER':level===7?'CHIEF ADMIN':level===6?'DEPUTY CHIEF ADMIN':level===5?'SENIOR ADMIN':level>=1?'ADMIN':null;
   badges.replaceChildren(memberBadges({role,vip:user.vip?.tier}));
   setValue('profile-email',user.email);
   setValue('profile-status',user.banned?'Suspended':user.isOwner?'Founder':user.staff?.level?'Adm Lvl '+user.staff.level+(user.staff.suspended?' · Suspended':''):'Active account');

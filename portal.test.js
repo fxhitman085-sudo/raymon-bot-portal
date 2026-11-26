@@ -1221,6 +1221,8 @@ test('V5 community verifies staff badges and active VIP tier independently',t=>{
  assert.deepEqual(v5.role(member),{role:null,vip:'gold'});
  store.v3.setStaff(owner,{userId:member,action:'level',level:7});
  assert.deepEqual(v5.role(member),{role:'CHIEF ADMIN',vip:'gold'});
+ store.v3.setStaff(owner,{userId:member,action:'level',level:6});
+ assert.deepEqual(v5.role(member),{role:'DEPUTY CHIEF ADMIN',vip:'gold'});
  store.v3.setStaff(owner,{userId:member,action:'level',level:5});
  assert.deepEqual(v5.role(member),{role:'SENIOR ADMIN',vip:'gold'});
  store.v3.setStaff(owner,{userId:member,action:'level',level:3});
@@ -1417,4 +1419,17 @@ test('sound sticker uses ordinary media-command permissions and requires a quote
     assert.equal(result.ok,false);
     assert.match(result.message,/Reply to a regular video/);
   }
+});
+
+test('Chief Admin with VIP permissions cannot grant or revoke Founder VIP',t=>{
+  const {store,owner,member}=fixture(t);
+  store.v3.setStaff(owner,{userId:member,action:'level',level:7});
+  store.v3.setPermissions(owner,{level:7,permissions:['vip.grant']});
+  store.vip.grant(owner,{userId:owner,tier:'gold',days:1});
+  const before=store.vip.membership(owner);
+  assert.throws(()=>store.vip.grant(member,{userId:owner,tier:'diamond',days:1}),{status:403});
+  assert.throws(()=>store.vip.revoke(member,owner),{status:403});
+  assert.deepEqual(store.vip.membership(owner),before);
+  store.vip.revoke(owner,owner);
+  assert.equal(store.vip.membership(owner),null);
 });

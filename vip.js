@@ -234,12 +234,14 @@ class Vip {
     const account=this.s.requireActive(actor);
     if(!this.s.v3.role(account).permissions.some(p=>['vip.view','vip.plans','vip.grant'].includes(p)))
       this.fail(403,'VIP administration access required.');
-    return this.s.all(`SELECT m.user_id AS id,u.email,u.name,m.tier,m.expiry,m.auto_renew AS autoRenew
+    return this.s.all(`SELECT m.user_id AS id,u.email,u.name,m.tier,m.expiry,m.auto_renew AS autoRenew,
+      EXISTS(SELECT 1 FROM owner WHERE user_id=u.id) AS founder
       FROM vip_memberships m JOIN users u ON u.id=m.user_id WHERE m.expiry>? ORDER BY m.expiry DESC LIMIT 200`,this.s.clock());
   }
   grant(actor,{userId,tier,days=0,hours=0,minutes=0}){
     return this.s.tx(()=>{
-      this.s.v3.permit(actor,'vip.grant');
+      const staff=this.s.v3.permit(actor,'vip.grant');
+      if(!staff.is_owner&&this.s.user(userId)?.is_owner)this.fail(403,'Only the Founder can manage Founder VIP.');
       if(!tiers.includes(tier)||![days,hours,minutes].every(n=>Number.isSafeInteger(n)&&n>=0)||days>365||hours>23||minutes>59)
         this.fail(400,'Choose a valid tier and enter whole days, hours (0–23), and minutes (0–59).');
       const totalMinutes=(days*24+hours)*60+minutes;
@@ -259,7 +261,8 @@ class Vip {
   }
   revoke(actor,userId){
     return this.s.tx(()=>{
-      this.s.v3.permit(actor,'vip.grant');
+      const staff=this.s.v3.permit(actor,'vip.grant');
+      if(!staff.is_owner&&this.s.user(userId)?.is_owner)this.fail(403,'Only the Founder can manage Founder VIP.');
       const m=this.s.get('SELECT 1 FROM vip_memberships WHERE user_id=?',userId);
       if(!m)this.fail(404,'Membership not found.');
       this.s.run('UPDATE vip_memberships SET expiry=?,auto_renew=0 WHERE user_id=?',this.s.clock(),userId);
