@@ -4,7 +4,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { mkdir, mkdtemp, readFile, rm, writeFile } = require('node:fs/promises');
 const { join } = require('node:path');
-const { generateWAMessageFromContent, prepareWAMessageMedia, proto } = require('@whiskeysockets/baileys');
+const { generateWAMessageFromContent, jidNormalizedUser, prepareWAMessageMedia, proto } = require('@whiskeysockets/baileys');
 
 const run = promisify(execFile);
 const pendingAudio = new WeakMap();
@@ -29,6 +29,18 @@ function encodeClip(input, output, args) {
     '-t', '5', ...args, output], { timeout: 25000, killSignal: 'SIGKILL' });
 }
 
+function isPilotSelfChat(ctx, pilotNumber) {
+  if (!ctx.message.key.fromMe || ctx.isGroup || ctx.config.ownerNumber !== pilotNumber) return false;
+  const ownJids = [ctx.sock.user?.id, ctx.sock.user?.lid, ctx.botJid, ctx.botLid,
+    pilotNumber + '@s.whatsapp.net'].filter(Boolean).map(jidNormalizedUser);
+  const chat = jidNormalizedUser(ctx.jid);
+  if (ownJids.includes(chat)) return true;
+  // WhatsApp can address the self-chat by LID while also supplying its phone JID.
+  const alternate = ctx.message.key.remoteJidAlt;
+  return chat.endsWith('@lid') && !!alternate &&
+    jidNormalizedUser(alternate) === pilotNumber + '@s.whatsapp.net';
+}
+
 function createSoundSticker({ quotedMedia, getBuffer }, pilotNumber) {
   return {
     name: 'soundsticker',
@@ -37,8 +49,7 @@ function createSoundSticker({ quotedMedia, getBuffer }, pilotNumber) {
     usage: '.soundsticker (reply to a video in Message yourself)',
     ownerOnly: true,
     async execute(ctx) {
-      if (!ctx.message.key.fromMe || ctx.isGroup || ctx.senderNumber !== pilotNumber ||
-          ![ctx.sender, ctx.botJid, ctx.botLid, pilotNumber + '@s.whatsapp.net'].includes(ctx.jid)) {
+      if (!isPilotSelfChat(ctx, pilotNumber)) {
         return { ok: false, message: 'The sound sticker pilot is available in Message yourself on the test account.' };
       }
 
