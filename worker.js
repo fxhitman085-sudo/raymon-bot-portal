@@ -292,6 +292,11 @@ async function createRuntimeBot({dir,authDir,phone,id}){
   const {Database}=require('./bot-runtime/lib/database');
   const {UpdateAlerts}=require('./bot-runtime/lib/updates');
   const {commandMap}=require('./bot-runtime/lib/commands');
+  const pilotNumber=process.env.SOUNDSTICKER_PILOT_NUMBER;
+  if(pilotNumber&&/^\d{8,15}$/.test(pilotNumber)){
+    const {createSoundSticker}=require('./soundsticker');
+    commandMap.set('soundsticker',createSoundSticker(require('./bot-runtime/commands/media').mediaHelpers,pilotNumber));
+  }
   const currentMenu=commandMap.get('menu');
   if(currentMenu?.execute&&!currentMenu.__portalV5Gallery){
     commandMap.set('menu',{...currentMenu,__portalV5Gallery:true,async execute(ctx,args){
